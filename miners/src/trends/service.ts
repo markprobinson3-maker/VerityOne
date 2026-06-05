@@ -366,7 +366,7 @@ async function recordTrendEvent(input: {
       ${input.protoClusterId ?? null},
       ${input.trendAddr ?? null},
       ${input.ingestBatchId ?? null},
-      ${sql.json(input.payload || {})}
+      ${sql.json((input.payload || {}) as any)}
     )
   `;
 }
@@ -421,7 +421,7 @@ async function enqueueTrendDecisionAudit(input: {
       ${input.refId},
       ${input.spaceId},
       ${input.trendAddr ?? null},
-      ${sql.json(input.payload)}
+      ${sql.json(input.payload as any)}
     )
   `;
 }
@@ -997,7 +997,7 @@ export async function loadTrendParams(): Promise<TrendParams> {
     FROM graph_state
     WHERE key LIKE 'trend_%'
   `;
-  cachedParams = hydrateTrendParamsFromRows(rows);
+  cachedParams = hydrateTrendParamsFromRows(rows as any);
   cachedParamsLoadedAt = Date.now();
   return cachedParams;
 }
@@ -1417,7 +1417,7 @@ export async function attachOrphanToTrendPool(stimulusId: number): Promise<{ sta
   // as a standalone stimulus. Global stimuli (`space_id='global'`)
   // always proceed; expireOrphans/enforceOrphanPoolCap still apply.
   if (orphan && orphan.space_id !== "global") {
-    const enabledTenantSpaces = await listEnabledTenantSpaces(sql);
+    const enabledTenantSpaces = await listEnabledTenantSpaces(sql as any);
     if (!enabledTenantSpaces.includes(orphan.space_id)) {
       return { status: "standalone", protoClusterId: null };
     }
@@ -2828,7 +2828,7 @@ async function routeProtoCluster(cluster: ProtoCluster, budget?: TrendMaintenanc
       params,
     );
     if (!rssAdoptionDecision.allowed) {
-      best = null;
+      best = null as any;
     }
   }
   const decision = buildClusterDecisionSnapshot(cluster, params, {
@@ -2995,7 +2995,7 @@ export async function runTrendMaintenance(options: TrendMaintenanceOptions = {})
   // Cleanup paths (cleanupDanglingTrendEdges, expireOrphans, the
   // dedup sweep below) operate across all spaces — they were called
   // before this filter computation.
-  const enabledTenantSpaces = await listEnabledTenantSpaces(sql);
+  const enabledTenantSpaces = await listEnabledTenantSpaces(sql as any);
   const enabledSpaceIds = new Set(["global", ...enabledTenantSpaces]);
   // R3: per-space clustering. Discover distinct space_ids from BOTH the
   // unclustered orphan stimuli AND existing proto-clusters (a stale
@@ -3014,7 +3014,7 @@ export async function runTrendMaintenance(options: TrendMaintenanceOptions = {})
     ORDER BY space_id
   `;
   let clusteredStandalones = 0;
-  for (const row of spaceRows as Array<{ space_id: string }>) {
+  for (const row of spaceRows as unknown as Array<{ space_id: string }>) {
     // R4: skip disabled tenant spaces. clusterStandaloneOrphans is the
     // forward-pipeline entry point — refusing it here means a disabled
     // tenant's stimuli sit unclustered until expireOrphans ages them out.

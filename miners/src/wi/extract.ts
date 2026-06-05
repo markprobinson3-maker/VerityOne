@@ -659,7 +659,7 @@ function validateAtom(raw: any): ExtractedAtom | null {
   const validTemporalities = ["DURABLE", "CURRENT", "EPHEMERAL"];
   const temporality = validTemporalities.includes(raw.temporality) ? raw.temporality : "DURABLE";
 
-  return { content, type, subtype, domains, importance, actionability, temporality };
+  return { content, type: type as any, subtype: subtype as any, domains, importance, actionability, temporality };
 }
 
 // ============================================================

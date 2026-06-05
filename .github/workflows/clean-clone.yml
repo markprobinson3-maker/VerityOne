@@ -1,0 +1,22 @@
+name: clean-clone
+
+# Source-release proof: a fresh clone must install with the committed lockfile
+# and typecheck cleanly. Guards against lockfile drift + new type errors.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck

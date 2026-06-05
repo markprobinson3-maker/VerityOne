@@ -121,7 +121,7 @@ async function reinforceDurableHeatTarget(targetAddr: string, opts: RouteOptions
     await sql`
       UPDATE nodes
       SET source_refs = ${sql.json(grounded.sourceRefs)},
-          source_context = ${sql.json(grounded.sourceContext)},
+          source_context = ${sql.json(grounded.sourceContext as any)},
           confidence = ${grounded.confidence},
           updated_at = NOW()
       WHERE addr = ${targetAddr}
@@ -426,7 +426,7 @@ export async function route(atoms: ExtractedAtom[], runId: string, opts: RouteOp
         ORDER BY embedding <=> ${vecStr}::halfvec LIMIT 1
       `;
       if (echoes.length > 0 && parseFloat(echoes[0].similarity) > 0.90) {
-        rediscoveryMap.set(i, echoes[0]);
+        rediscoveryMap.set(i, echoes[0] as any);
       }
     }
   }

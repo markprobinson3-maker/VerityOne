@@ -99,7 +99,7 @@ export async function enrichBatch(batchAtoms?: any[]): Promise<{ enriched: numbe
   // Grab batch from pool if not provided
   if (!batchAtoms) {
     // Claim atoms atomically
-    batchAtoms = await sql`
+    batchAtoms = (await sql`
       UPDATE wi_atom_pool SET status = 'enriching'
       WHERE id IN (
         SELECT id FROM wi_atom_pool
@@ -109,7 +109,7 @@ export async function enrichBatch(batchAtoms?: any[]): Promise<{ enriched: numbe
         FOR UPDATE SKIP LOCKED
       )
       RETURNING *
-    `;
+    `) as any[];
   }
 
   if (batchAtoms.length === 0) return { enriched: 0, failed: 0 };
