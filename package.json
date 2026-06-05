@@ -1,0 +1,34 @@
+{
+  "name": "verity-one",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Verity One \u2014 Self-organizing knowledge pyramid system",
+  "workspaces": [
+    "packages/*",
+    "api",
+    "miners"
+  ],
+  "scripts": {
+    "dev:api": "cd api && bun run dev",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit -p api/tsconfig.typecheck.json",
+    "db:setup": "export PSQL_TARGET=\"${PSQL_TARGET:-${DATABASE_URL:-postgresql://localhost:5432/verity}}\" && export DATABASE_URL=\"$PSQL_TARGET\" && psql \"$PSQL_TARGET\" -v ON_ERROR_STOP=1 -f db/schema.sql"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.3.3",
+    "@verity-one/crypto-hash": "workspace:*",
+    "@verity-one/db-pool": "workspace:*",
+    "@verity-one/embed": "workspace:*",
+    "@verity-one/graph-shape": "workspace:*",
+    "@verity-one/vault-root": "workspace:*"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/markprobinson3-maker/VerityOne.git"
+  }
+}

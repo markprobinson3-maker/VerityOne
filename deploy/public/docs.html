@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Docs — Verity One</title>
+  <link rel="stylesheet" href="/vo-theme.css">
+  <link rel="icon" href="/logo.png">
+</head>
+<body>
+  <main class="page">
+
+    <!-- Inline SVG filter: feTurbulence grain applied via .grain to mono text
+         and 1.5px rules for a subtly worn engraving edge. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <filter id="vo-grain" x="-1%" y="-1%" width="102%" height="102%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="noise"/>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.6" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
+
+    <nav class="nav grain" aria-label="Primary">
+      <a class="nav-brand" href="/" aria-label="Verity One — home">
+        <svg class="nav-brand-mark" width="54" height="54" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.28"/>
+          <circle cx="16" cy="16" r="10.5" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.18"/>
+          <path d="M31,16 L17.85,16.77 L22.36,22.36 L16.77,17.85 L16,31 L15.23,17.85 L9.64,22.36 L14.15,16.77 L1,16 L14.15,15.23 L9.64,9.64 L15.23,14.15 L16,1 L16.77,14.15 L22.36,9.64 L17.85,15.23 Z"
+                fill="currentColor"/>
+          <circle cx="16" cy="16" r="1.4" fill="currentColor" opacity="0.7"/>
+        </svg>
+        <span class="nav-brand-words">
+          <div>VERITY</div>
+          <div>ONE</div>
+        </span>
+      </a>
+      <a class="nav-link" href="/start">START</a>
+      <a class="nav-link" href="/agents">AGENTS</a>
+      <a class="nav-link" href="/trust">TRUST</a>
+      <a class="nav-link" href="/plus">VO+</a>
+      <a class="nav-link" href="/docs" data-active>DOCS</a>
+      <div class="nav-theme">
+        <span class="theme-label">DARK</span>
+        <span class="theme-toggle" role="button" aria-label="Toggle theme" tabindex="0"></span>
+      </div>
+    </nav>
+
+
+<!-- ============================================================
+     HEADER — title band. Mono kicker + serif display, matching
+     the download page's full-bleed rhythm.
+     ============================================================ -->
+<section class="vo-section vo-section--roomy" style="text-align:center;">
+  <div class="vo-mono-section" style="margin-bottom:24px;">DOCS</div>
+  <h1 class="vo-display" style="margin:0 auto 18px; max-width:780px; text-transform:uppercase;">
+    A Reference For<br>Connecting And Operating.
+  </h1>
+  <p class="vo-body" style="max-width:620px; margin:0 auto;">
+    An honest reference for connecting to and operating Verity One — discovery,
+    authentication, the hosted API, releases, and running a local node.
+  </p>
+</section>
+
+<!-- ============================================================
+     PROTOCOL & DISCOVERY — how agents find and connect.
+     Only LIVE 200 routes are linked.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">PROTOCOL &amp; DISCOVERY</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">How agents discover and connect</h2>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      Verity One is discoverable from a single root. An agent fetches
+      <span class="vo-code-inline">GET /</span> to learn the available surfaces,
+      reads the ontology to understand the graph it is talking to, and follows the
+      descriptor and connect routes to wire itself up.
+    </p>
+    <div class="vo-prose">
+      <ul>
+        <li>
+          <a href="/">GET /</a> — the discovery root: the entry point that
+          enumerates the live surfaces.
+        </li>
+        <li>
+          <a href="/schema">/schema</a> — the ontology: the node and edge types
+          that structure the graph.
+        </li>
+        <li>
+          <a href="/.well-known/agent">/.well-known/agent</a> — the agent
+          descriptor, advertised at the well-known path.
+        </li>
+        <li>
+          <a href="/connect">/connect</a> — the connect route: how a client
+          attaches to a node.
+        </li>
+        <li>
+          <a href="/toc">/toc</a> — a table of contents over the available
+          routes.
+        </li>
+      </ul>
+    </div>
+    <p class="vo-body-sm" style="margin:18px 0 0;">
+      Machine readers should start at the <a href="/agents">/agents</a> page, and
+      can read the plain-text descriptors at
+      <a href="/agents.md">/agents.md</a> and <a href="/llms.txt">/llms.txt</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     AUTHENTICATION (OAUTH) — local node = authorization server,
+     resource = verityone.app/mcp, scopes vo.read + vo.write.intent.
+     The two live well-known OAuth docs are linked.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">AUTHENTICATION · OAUTH</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">The OAuth model</h2>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      Web agents reach Verity One through an OAuth-bearer flow. Your
+      <strong>local node acts as the authorization server</strong>, and the
+      protected resource is the connector at
+      <span class="vo-code-inline">verityone.app/mcp</span>. Two scopes are issued:
+      <span class="vo-code-inline">vo.read</span> for reads against the synced
+      mirror, and <span class="vo-code-inline">vo.write.intent</span> for writes —
+      which are queued as intents, not applied live.
+    </p>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      The flow is described by the two live well-known documents:
+    </p>
+    <div class="vo-prose">
+      <ul>
+        <li>
+          <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>
+          — the authorization server metadata.
+        </li>
+        <li>
+          <a href="/.well-known/oauth-protected-resource">/.well-known/oauth-protected-resource</a>
+          — the protected-resource metadata for
+          <span class="vo-code-inline">verityone.app/mcp</span>.
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     HOSTED REST API — /hosted-mcp/* is REST (vop_REDACTED bearer),
+     NOT an MCP transport. Per HONESTY rule 11.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">HOSTED REST API</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">A REST surface, not a transport</h2>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      The <span class="vo-code-inline">/hosted-mcp/*</span> routes are a hosted
+      <strong>REST API</strong>, authenticated with a
+      <span class="vo-code-inline">vop_REDACTED</span> bearer token. Despite the path
+      name, this is plain request/response REST — it is
+      <em>not</em> an MCP transport. Use it when you want HTTP access to the hosted
+      mirror without speaking the MCP protocol.
+    </p>
+    <p class="vo-body-sm" style="margin:0;">
+      The authoritative MCP transport is the local stdio server wired by
+      <span class="vo-code-inline">vo mcp install</span>; the hosted REST API and
+      the OAuth-bearer connector at
+      <span class="vo-code-inline">verityone.app/mcp</span> both speak to the
+      synced mirror, not to local authority.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     RELEASES & CHANNELS — source-only, beta. Stable pinned &
+     recommended; nightly auto-published from main. Version read
+     from the stable manifest (0.1.2). No binary, no Homebrew/npm.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">RELEASES &amp; CHANNELS</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">Source-only, in beta</h2>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      Verity One installs <em>from source</em> and is in beta. There is no packaged
+      or signed binary, and no Homebrew or npm release — the installer clones the
+      repo at a pinned commit and builds a local node on your machine.
+    </p>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:0; border-top:1.5px solid var(--vo-rule);">
+      <div style="padding:18px 0; border-bottom:1.5px solid var(--vo-rule);">
+        <div class="vo-mono-glyph" style="font-size:28px;">STABLE</div>
+        <div class="vo-mono-nav" style="margin-top:6px;">PINNED · RECOMMENDED</div>
+      </div>
+      <div style="padding:18px 0 18px 24px; border-bottom:1.5px solid var(--vo-rule); border-left:1.5px solid var(--vo-rule);">
+        <div class="vo-mono-glyph" style="font-size:28px;">NIGHTLY</div>
+        <div class="vo-mono-nav" style="margin-top:6px;">AUTO FROM MAIN</div>
+      </div>
+    </div>
+    <p class="vo-body-sm" style="margin:20px 0 18px;">
+      The <strong>stable</strong> channel is canonical and recommended: pinned to an
+      exact commit. The <strong>nightly</strong> channel is auto-published from
+      <span class="vo-code-inline">main</span> and served from
+      <span class="vo-code-inline">download.verityone.app</span>. The current
+      version is read from the stable manifest —
+      <span class="vo-code-inline" data-stable-version>0.1.2</span>.
+    </p>
+    <div class="vo-prose">
+      <ul>
+        <li>
+          <a href="/download">/download</a> — install from source, with the current
+          release state.
+        </li>
+        <li>
+          <a href="/start">/start</a> — the step-by-step onboarding ladder:
+          install, connect, first recall.
+        </li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     RUNNING A NODE (OPERATORS) — local Postgres-backed node at
+     localhost:3100; dashboard at localhost:3100/dashboard.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">RUNNING A NODE · OPERATORS</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">A local node on your machine</h2>
+    <p class="vo-body-sm" style="margin:0 0 18px;">
+      Once built, Verity One runs as a local PostgreSQL-backed node at
+      <span class="vo-code-inline">localhost:3100</span> — the source of truth,
+      kept close and private on your machine. On-machine agents read and write to
+      it live over the stdio MCP server.
+    </p>
+    <p class="vo-body-sm" style="margin:0;">
+      Operators get a local dashboard at
+      <span class="vo-code-inline">localhost:3100/dashboard</span> to inspect and
+      operate the node.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     LEGAL — privacy + terms, in a vo-prose link list.
+     ============================================================ -->
+<section class="vo-section vo-section--last">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="margin-bottom:16px;">LEGAL</div>
+    <div class="vo-prose">
+      <ul>
+        <li><a href="/privacy">/privacy</a> — the privacy policy.</li>
+        <li><a href="/terms">/terms</a> — the terms of service.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+    <footer class="foot grain">
+      <div>VERITY · ONE &nbsp; v0.1.2</div>
+      <div class="center">Ghost Mastering <span class="arrow">↗</span></div>
+      <div class="right">MIT LICENSE &nbsp;·&nbsp; MMXXVI</div>
+    </footer>
+
+  </main>
+
+  <script>
+    // Theme toggle — light mode inverts colors and image exposure.
+    (function () {
+      var html = document.documentElement;
+      var toggle = document.querySelector('.theme-toggle');
+      var label  = document.querySelector('.theme-label');
+      var stored = (function () { try { return localStorage.getItem('vo-theme'); } catch (e) { return null; } })();
+      var apply = function (theme) {
+        if (theme === 'light') html.setAttribute('data-theme', 'light');
+        else html.removeAttribute('data-theme');
+        if (label) label.textContent = theme === 'light' ? 'LIGHT' : 'DARK';
+      };
+      apply(stored === 'light' ? 'light' : 'dark');
+      var flip = function () {
+        var next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        apply(next);
+        try { localStorage.setItem('vo-theme', next); } catch (e) {}
+      };
+      if (toggle) {
+        toggle.addEventListener('click', flip);
+        toggle.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

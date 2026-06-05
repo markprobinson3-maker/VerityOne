@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download &amp; Install — Verity One</title>
+  <link rel="stylesheet" href="/vo-theme.css">
+  <link rel="icon" href="/logo.png">
+</head>
+<body>
+  <main class="page">
+
+    <!-- Inline SVG filter: feTurbulence grain applied via .grain to
+         mono text and 1.5px rules for a subtly worn engraving edge. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <filter id="vo-grain" x="-1%" y="-1%" width="102%" height="102%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="noise"/>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.6" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
+
+    <nav class="nav grain" aria-label="Primary">
+      <a class="nav-brand" href="/" aria-label="Verity One — home">
+        <svg class="nav-brand-mark" width="54" height="54" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.28"/>
+          <circle cx="16" cy="16" r="10.5" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.18"/>
+          <path d="M31,16 L17.85,16.77 L22.36,22.36 L16.77,17.85 L16,31 L15.23,17.85 L9.64,22.36 L14.15,16.77 L1,16 L14.15,15.23 L9.64,9.64 L15.23,14.15 L16,1 L16.77,14.15 L22.36,9.64 L17.85,15.23 Z"
+                fill="currentColor"/>
+          <circle cx="16" cy="16" r="1.4" fill="currentColor" opacity="0.7"/>
+        </svg>
+        <span class="nav-brand-words">
+          <div>VERITY</div>
+          <div>ONE</div>
+        </span>
+      </a>
+      <a class="nav-link" href="/start">START</a>
+      <a class="nav-link" href="/agents">AGENTS</a>
+      <a class="nav-link" href="/trust">TRUST</a>
+      <a class="nav-link" href="/plus">VO+</a>
+      <a class="nav-link" href="/docs">DOCS</a>
+      <div class="nav-theme">
+        <span class="theme-label">DARK</span>
+        <span class="theme-toggle" role="button" aria-label="Toggle theme" tabindex="0"></span>
+      </div>
+    </nav>
+
+    <!-- ============================================================
+         HERO — title band. Mono kicker + serif display, matching
+         the homepage's full-bleed hairline-divided rhythm.
+         ============================================================ -->
+    <section class="vo-section vo-section--roomy" style="text-align:center;">
+      <div class="vo-mono-section" style="margin-bottom:24px;">INSTALL &nbsp;·&nbsp; FROM SOURCE</div>
+      <h1 class="vo-display" style="margin:0 auto 18px; max-width:780px; text-transform:uppercase;">
+        Bring The Source<br>Of Truth Home.
+      </h1>
+      <p class="vo-body" style="max-width:600px; margin:0 auto;">
+        Verity One runs locally on your machine — Postgres and a small API, kept
+        close and private. One command builds it from source. Your local node is
+        the source of truth; nothing about the install reaches past your desk
+        unless you decide it should.
+      </p>
+    </section>
+
+    <!-- ============================================================
+         CURRENT RELEASE — honest state band. Source-mode, 0.1.2,
+         no packaged binary. Read straight from the live manifest.
+         ============================================================ -->
+    <section class="vo-section">
+      <div class="vo-container">
+        <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">CURRENT RELEASE</div>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0; border-top:1.5px solid var(--vo-rule);">
+          <div style="padding:18px 0; border-bottom:1.5px solid var(--vo-rule);">
+            <div class="vo-mono-glyph" style="font-size:28px;" data-stable-version>0.1.2</div>
+            <div class="vo-mono-nav" style="margin-top:6px;">STABLE CHANNEL</div>
+          </div>
+          <div style="padding:18px 0 18px 24px; border-bottom:1.5px solid var(--vo-rule); border-left:1.5px solid var(--vo-rule);">
+            <div class="vo-mono-glyph" style="font-size:28px;">SOURCE</div>
+            <div class="vo-mono-nav" style="margin-top:6px;">INSTALL MODE</div>
+          </div>
+          <div style="padding:18px 0 18px 24px; border-bottom:1.5px solid var(--vo-rule); border-left:1.5px solid var(--vo-rule);">
+            <div class="vo-mono-glyph" style="font-size:28px;">MIT</div>
+            <div class="vo-mono-nav" style="margin-top:6px;">LICENSE · OPEN</div>
+          </div>
+        </div>
+        <p class="vo-body-sm" style="margin:20px 0 0;">
+          Verity One installs <em>from source</em>. The stable manifest is
+          source-mode — there is no packaged or signed <span class="vo-code-inline">vo-cli</span>
+          binary, and no Homebrew or npm release yet. The installer clones the repo,
+          pins it to the exact commit named in the manifest, and builds it on your
+          machine. The apex <span class="vo-code-inline">verityone.app/download</span> is a
+          compatibility landing; the canonical install origin is
+          <span class="vo-code-inline">download.verityone.app</span>.
+          Source install still works exactly as shown below, and
+          source install remains a supported parallel path — not a fallback.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         ONE-LINE INSTALL — the canonical terminal step.
+         ============================================================ -->
+    <section class="vo-section">
+      <div class="vo-container vo-container--narrow">
+        <div class="vo-mono-section" style="margin-bottom:16px;">
+          <span style="color:var(--vo-amber);">1.</span> &nbsp; ONE-LINE INSTALL
+        </div>
+        <pre class="vo-code"><span class="copy" data-copy="curl -fsSL https://verityone.app/install.sh | bash">COPY</span><span class="prompt">$</span> curl -fsSL <span class="arg">https://verityone.app/install.sh</span> <span class="pipe">|</span> bash</pre>
+        <p class="vo-body-sm" style="margin:14px 0 0;">
+          The installer is served from the canonical install origin,
+          <span class="vo-code-inline">download.verityone.app</span>. It reads the
+          live stable manifest, builds Verity One from source at the pinned commit,
+          and starts your local node.
+        </p>
+
+        <div class="vo-mono-section" style="margin:36px 0 16px;">
+          <span style="color:var(--vo-amber);">2.</span> &nbsp; CONNECT YOUR AGENTS
+        </div>
+        <pre class="vo-code"><span class="copy" data-copy="vo mcp install --client codex">COPY</span><span class="prompt">$</span> vo mcp install <span class="arg">--client codex</span></pre>
+        <p class="vo-body-sm" style="margin:14px 0 0;">
+          This wires a client to your local node over a stdio MCP server — the
+          authoritative transport. Valid clients today are
+          <span class="vo-code-inline">codex</span>,
+          <span class="vo-code-inline">claude-desktop</span>, and
+          <span class="vo-code-inline">generic</span>. Your agents then recall from
+          the same local memory.
+        </p>
+
+        <p class="vo-body-sm" style="margin:24px 0 0;">
+          New to the whole flow? The step-by-step onboarding ladder lives at
+          <a href="/start#shortest">/start#shortest</a> — install, connect, and first
+          recall, in order — so this page stays a reference, not a duplicate of it.
+        </p>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         FROM THE MANIFEST — for those who want to pin a checkout by
+         hand. Honest source path, no invented artifact URLs.
+         ============================================================ -->
+    <section class="vo-section">
+      <div class="vo-container">
+        <div class="vo-mono-section" style="margin-bottom:16px;">PREFER TO BUILD IT YOURSELF?</div>
+        <p class="vo-body-sm" style="margin:0 0 18px;">
+          The same source path is open by hand. Read the pinned commit from the
+          canonical manifest, clone the repo, check out that exact ref, and build.
+          Nothing here downloads a prebuilt binary — there isn't one.
+        </p>
+        <pre class="vo-code"><span class="prompt">$</span> SHA=$(curl -fsSL <span class="arg">https://download.verityone.app/releases/stable.json</span> \
+    <span class="pipe">|</span> bun -e '<span class="arg">console.log(JSON.parse(await Bun.stdin.text()).install.source_ref)</span>')
+
+<span class="prompt">$</span> git clone <span class="arg">https://github.com/markprobinson3-maker/VerityOne.git</span>
+<span class="prompt">$</span> cd verity-one
+<span class="prompt">$</span> <span class="arg">git checkout "$SHA"</span>
+<span class="prompt">$</span> bun install
+<span class="prompt">$</span> bun run db:reset
+<span class="prompt">$</span> cd api <span class="pipe">&amp;&amp;</span> bun run start</pre>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         CANONICAL SURFACES — only routes that are LIVE today.
+         The stale 0.1.1 release-notes link (404) is dropped.
+         The .sig signs the manifest JSON, not any binary.
+         ============================================================ -->
+    <section class="vo-section">
+      <div class="vo-container">
+        <div class="vo-mono-section" style="margin-bottom:16px;">CANONICAL SURFACES</div>
+        <div class="vo-prose">
+          <ul>
+            <li>
+              <a href="https://download.verityone.app/">download.verityone.app</a>
+              — the canonical install origin and landing page.
+            </li>
+            <li>
+              <a href="https://download.verityone.app/releases/stable.json">releases/stable.json</a>
+              — the live stable manifest (channel, version, pinned source commit).
+            </li>
+            <li>
+              <a href="https://download.verityone.app/releases/stable.json.sig">releases/stable.json.sig</a>
+              — a detached signature over the <em>manifest</em>, so the installer
+              can verify the manifest's integrity before building.
+            </li>
+            <li>
+              <a href="https://verityone.app/install.sh">install.sh</a>
+              — the one-line install script itself.
+            </li>
+            <li>
+              <a href="https://releases.verityone.app/0.1.1/">release notes</a>
+              — the published notes referenced by the stable manifest.
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         VO+ — soft optional web bridge. Does not replace the node.
+         ============================================================ -->
+    <section class="vo-section">
+      <div class="vo-container">
+        <div class="vo-mono-section" style="margin-bottom:16px;">BEYOND THE DESK · OPTIONAL</div>
+        <p class="vo-pullquote" style="margin:0;">
+          VO+ is a web bridge that can carry your memory beyond the desk
+          <em>on demand</em> — it does not replace the local node.
+        </p>
+        <p class="vo-body-sm" style="margin:18px 0 0;">
+          Everything above runs entirely local, and the local node stays the source
+          of truth. If and when you want recall from web MCP agents across browsers,
+          phones, and tablets, VO+ is the optional layer that reaches there. It is a
+          bridge, not a requirement, and none of it is needed to install or run
+          Verity One.
+        </p>
+      </div>
+    </section>
+
+    <footer class="foot grain">
+      <div>VERITY · ONE &nbsp; v0.1.2</div>
+      <div class="center">Ghost Mastering <span class="arrow">↗</span></div>
+      <div class="right">MIT LICENSE &nbsp;·&nbsp; MMXXVI</div>
+    </footer>
+
+  </main>
+
+  <script>
+    // Theme toggle — light mode inverts colors and image exposure.
+    (function () {
+      var html = document.documentElement;
+      var toggle = document.querySelector('.theme-toggle');
+      var label  = document.querySelector('.theme-label');
+      var stored = (function () { try { return localStorage.getItem('vo-theme'); } catch (e) { return null; } })();
+      var apply = function (theme) {
+        if (theme === 'light') html.setAttribute('data-theme', 'light');
+        else html.removeAttribute('data-theme');
+        if (label) label.textContent = theme === 'light' ? 'LIGHT' : 'DARK';
+      };
+      apply(stored === 'light' ? 'light' : 'dark');
+      var flip = function () {
+        var next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        apply(next);
+        try { localStorage.setItem('vo-theme', next); } catch (e) {}
+      };
+      if (toggle) {
+        toggle.addEventListener('click', flip);
+        toggle.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

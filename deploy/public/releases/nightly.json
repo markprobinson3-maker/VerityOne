@@ -1,0 +1,20 @@
+{
+  "channel": "nightly",
+  "version": "0.1.2-nightly-20260603145202",
+  "published_at": "2026-06-03T14:52:02.882Z",
+  "download_url": "https://download.verityone.app/",
+  "notes_url": "https://releases.verityone.app/0.1.1/",
+  "artifacts": {},
+  "install": {
+    "mode": "source",
+    "repo_url": "https://github.com/markprobinson3-maker/VerityOne.git",
+    "source_kind": "commit",
+    "source_ref": "1af74e0edc605b0f6b1525c7534ed8522ce9761c",
+    "bootstrap_steps": [
+      {
+        "kind": "bun_install"
+      }
+    ]
+  },
+  "packages": []
+}

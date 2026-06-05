@@ -1,0 +1,29 @@
+#!/bin/bash
+# vo-mcp launcher — resolves the package root relative to this script's own
+# location and runs dist/cli.js with the current user's node binary.
+#
+# This script is shipped in two places:
+#   1. Source tree:       mcp/bin/vo-mcp            (for repo-based use)
+#   2. Tenant install:    ~/.vo/mcp/bin/vo-mcp      (written by `vo-mcp install`)
+#
+# Both locations derive the package root from their own path, so symlinking
+# the installed launcher into a PATH directory is safe.
+set -e
+SELF="$0"
+# Follow symlinks to find the real script location (needed when the launcher
+# has been symlinked into a PATH directory like ~/.local/bin).
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *)  SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+PKG_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+CLI="$PKG_ROOT/dist/cli.js"
+if [ ! -f "$CLI" ]; then
+  echo "vo-mcp: cli.js not found at $CLI" >&2
+  echo "vo-mcp: run 'npm run build' in $PKG_ROOT" >&2
+  exit 1
+fi
+exec node "$CLI" "$@"

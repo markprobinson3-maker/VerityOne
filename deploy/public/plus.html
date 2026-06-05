@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VO+ — Verity One</title>
+  <link rel="stylesheet" href="/vo-theme.css">
+  <link rel="icon" href="/logo.png">
+</head>
+<body>
+  <main class="page">
+
+    <!-- Inline SVG filter: feTurbulence grain applied via .grain to mono text
+         and 1.5px rules for a subtly worn engraving edge. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <filter id="vo-grain" x="-1%" y="-1%" width="102%" height="102%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" result="noise"/>
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.6" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
+
+    <nav class="nav grain" aria-label="Primary">
+      <a class="nav-brand" href="/" aria-label="Verity One — home">
+        <svg class="nav-brand-mark" width="54" height="54" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.28"/>
+          <circle cx="16" cy="16" r="10.5" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.18"/>
+          <path d="M31,16 L17.85,16.77 L22.36,22.36 L16.77,17.85 L16,31 L15.23,17.85 L9.64,22.36 L14.15,16.77 L1,16 L14.15,15.23 L9.64,9.64 L15.23,14.15 L16,1 L16.77,14.15 L22.36,9.64 L17.85,15.23 Z"
+                fill="currentColor"/>
+          <circle cx="16" cy="16" r="1.4" fill="currentColor" opacity="0.7"/>
+        </svg>
+        <span class="nav-brand-words">
+          <div>VERITY</div>
+          <div>ONE</div>
+        </span>
+      </a>
+      <a class="nav-link" href="/start">START</a>
+      <a class="nav-link" href="/agents">AGENTS</a>
+      <a class="nav-link" href="/trust">TRUST</a>
+      <a class="nav-link" href="/plus" data-active>VO+</a>
+      <a class="nav-link" href="/docs">DOCS</a>
+      <div class="nav-theme">
+        <span class="theme-label">DARK</span>
+        <span class="theme-toggle" role="button" aria-label="Toggle theme" tabindex="0"></span>
+      </div>
+    </nav>
+
+
+<!-- ============================================================
+     HERO — VO+ title band. Mono kicker + serif display, one
+     true sentence: a bridge, not a replacement.
+     ============================================================ -->
+<section class="vo-section vo-section--roomy" style="text-align:center;">
+  <div class="vo-mono-section" style="margin-bottom:24px;">VO+ &nbsp;·&nbsp; OPTIONAL</div>
+  <h1 class="vo-display" style="margin:0 auto 18px; max-width:820px; text-transform:uppercase;">
+    Your Memory,<br>Beyond The Desk.
+  </h1>
+  <p class="vo-body" style="max-width:620px; margin:0 auto;">
+    VO+ carries your memory beyond the desk, on demand — a bridge, not a
+    replacement. Your local node stays the source of truth; VO+ never takes
+    its place.
+  </p>
+</section>
+
+<!-- ============================================================
+     WHEN YOU'D REACH FOR IT — recall from web agents; review a
+     synced snapshot from any device. All optional, later-phase.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">WHEN YOU'D REACH FOR IT</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">Away from the machine that holds your node.</h2>
+    <p class="vo-body" style="max-width:680px; margin:0 0 18px;">
+      Most of the time you work at the desk, and on-machine agents read and
+      write your local node directly. VO+ is for the moments you are somewhere
+      else — and only those moments.
+    </p>
+    <div class="vo-prose">
+      <ul>
+        <li>
+          Recall from web MCP agents — a browser, a phone, a tablet — that
+          can't reach the local node directly.
+        </li>
+        <li>
+          Review a synced snapshot of your memory from any device at
+          <span class="vo-code-inline">verityone.app/my</span>, once you've
+          linked and pushed.
+        </li>
+      </ul>
+    </div>
+    <p class="vo-body-sm" style="margin:18px 0 0;">
+      All of this is optional and later-phase. None of it is needed to install
+      Verity One, connect on-machine agents, or do your day-to-day work.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     WHAT SYNCS — outbound push to the hosted mirror, on demand.
+     Not a two-way merge. Nothing syncs until you link and push.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">WHAT SYNCS</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">Outbound, on demand — never a merge back.</h2>
+    <p class="vo-body" style="max-width:680px; margin:0 0 18px;">
+      When you choose to, the local node pushes your memory <em>outbound</em> to
+      a hosted mirror. Sync runs in one direction: from your machine to the
+      mirror. It is not a two-way merge, and there is no leg that pulls a graph
+      back into your node.
+    </p>
+    <p class="vo-body-sm" style="margin:0;">
+      Nothing leaves your machine until you link your account and push. Until
+      then the mirror is empty and the bridge is closed — the local node holds
+      everything.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     TWO ACCESS PATHS — one source of truth, two ways in.
+     On-machine agents write LIVE; web agents queue intents.
+     Link /agents for the contract.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">TWO ACCESS PATHS</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">One source of truth, two ways to reach it.</h2>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:0; border-top:1.5px solid var(--vo-rule); margin-top:8px;">
+      <div style="padding:20px 24px 20px 0; border-bottom:1.5px solid var(--vo-rule);">
+        <div class="vo-mono-nav" style="margin-bottom:10px;">ON-MACHINE · LIVE</div>
+        <p class="vo-body-sm" style="margin:0;">
+          Claude Desktop, Codex, and generic MCP clients read and write
+          <em>live</em> against the local node. Their changes land in the
+          source of truth immediately.
+        </p>
+      </div>
+      <div style="padding:20px 0 20px 24px; border-bottom:1.5px solid var(--vo-rule); border-left:1.5px solid var(--vo-rule);">
+        <div class="vo-mono-nav" style="margin-bottom:10px;">WEB · QUEUED</div>
+        <p class="vo-body-sm" style="margin:0;">
+          Web agents reach the synced mirror. Their reads come from the last
+          sync, and their writes are <em>queued as intents</em>
+          (<span class="vo-code-inline">vo.write.intent</span>) — recorded, not
+          applied live to your node.
+        </p>
+      </div>
+    </div>
+    <div class="vo-prose" style="margin-top:18px;">
+      <p class="vo-body-sm" style="margin:0;">
+        For the wire-level contract — transports, scopes, and how queued
+        intents are shaped — see <a href="/agents">/agents</a>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     ENCRYPTED, NOT ZERO-KNOWLEDGE — honest crypto framing.
+     Service-managed keys; hosted layer can read while syncing.
+     Local node remains authoritative. Link /trust.
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">ENCRYPTED, NOT ZERO-KNOWLEDGE</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">We're plain about what the mirror can see.</h2>
+    <p class="vo-body" style="max-width:680px; margin:0 0 18px;">
+      The hosted mirror is encrypted at rest with a per-tenant key. Those keys
+      are service-managed, which means the hosted layer <em>can</em> read your
+      memory while it syncs. This is encrypted-at-rest, not zero-knowledge —
+      and we'd rather say so plainly than imply otherwise.
+    </p>
+    <p class="vo-body-sm" style="margin:0;">
+      The local node remains authoritative; the mirror is a copy you opted to
+      send. For the full wording on keys and trust, see
+      <a href="/trust" style="color:var(--vo-amber);">/trust</a>.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     GOOGLE DRIVE MIRROR (OPTIONAL) — needs hosted connection,
+     may re-prompt for Google auth. Not "set and forget".
+     ============================================================ -->
+<section class="vo-section">
+  <div class="vo-container">
+    <div class="vo-mono-section" style="color:var(--vo-amber); margin-bottom:20px;">GOOGLE DRIVE MIRROR · OPTIONAL</div>
+    <h2 class="vo-h2" style="margin:0 0 18px;">Mirror your vault into a Drive folder.</h2>
+    <p class="vo-body" style="max-width:680px; margin:0 0 18px;">
+      If you want it, VO+ can mirror your vault into a Google Drive folder of
+      your choosing. It builds on your hosted connection, so it's an extension
+      of VO+ rather than a separate path.
+    </p>
+    <p class="vo-body-sm" style="margin:0;">
+      It isn't set-and-forget: Google may require you to re-authorize the
+      connection periodically, and the mirror keeps working only while that
+      authorization is current.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================
+     CLOSE — VO+ is optional and later-phase; everything core
+     runs entirely local.
+     ============================================================ -->
+<section class="vo-section vo-section--last">
+  <div class="vo-container">
+    <p class="vo-pullquote" style="margin:0;">
+      VO+ is optional and later-phase. Everything core to Verity One runs
+      entirely on your machine — the bridge is there only if and when you
+      reach for it.
+    </p>
+  </div>
+</section>
+
+    <footer class="foot grain">
+      <div>VERITY · ONE &nbsp; v0.1.2</div>
+      <div class="center">Ghost Mastering <span class="arrow">↗</span></div>
+      <div class="right">MIT LICENSE &nbsp;·&nbsp; MMXXVI</div>
+    </footer>
+
+  </main>
+
+  <script>
+    // Theme toggle — light mode inverts colors and image exposure.
+    (function () {
+      var html = document.documentElement;
+      var toggle = document.querySelector('.theme-toggle');
+      var label  = document.querySelector('.theme-label');
+      var stored = (function () { try { return localStorage.getItem('vo-theme'); } catch (e) { return null; } })();
+      var apply = function (theme) {
+        if (theme === 'light') html.setAttribute('data-theme', 'light');
+        else html.removeAttribute('data-theme');
+        if (label) label.textContent = theme === 'light' ? 'LIGHT' : 'DARK';
+      };
+      apply(stored === 'light' ? 'light' : 'dark');
+      var flip = function () {
+        var next = html.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+        apply(next);
+        try { localStorage.setItem('vo-theme', next); } catch (e) {}
+      };
+      if (toggle) {
+        toggle.addEventListener('click', flip);
+        toggle.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

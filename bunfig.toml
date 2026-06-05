@@ -1,0 +1,15 @@
+# Bun configuration.
+#
+# [test].preload runs once per `bun test` process, before any test. We use it for a
+# fail-closed PRODUCTION-database guard (FU1): it refuses to run the suite against a DB
+# that holds real data, so a stray `bun test` with DATABASE_URL pointing at prod can't
+# pollute or corrupt it. The guard fails OPEN on any error/timeout (it never breaks a
+# legitimate run by its own failure); api/scripts/detect-tenant-residue.ts is the
+# detection backstop. See api/test-preload.ts + api/src/lib/test-db-guard.ts.
+#
+# SCOPE: bun resolves bunfig.toml from cwd upward, so this preload applies to EVERY
+# `bun test` run repo-wide (api/, miners/, mcp/, agent-lab/, …), not just api/. If you
+# add a Postgres service + DATABASE_URL to a new workflow, the guard will evaluate there
+# too (it stays fail-open + only refuses a >threshold real-data DB).
+[test]
+preload = ["./api/test-preload.ts"]

@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Verity One Browser Capture",
+  "version": "0.1.0",
+  "description": "Capture the active tab into the local Verity One vault inbox.",
+  "action": {
+    "default_title": "Capture to Verity One",
+    "default_popup": "popup/popup.html"
+  },
+  "options_page": "options/options.html",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ]
+}

@@ -1,0 +1,7 @@
+export interface MirroredStoredPolicy { write_permission?: string; recall_scope?: string; visible_projects?: string[] | null; day_journal_read_sensitivities?: string[] | null; }
+export interface ResolvedHostedAgent { credential_id: string; account_id: string; tenant_id: string; agent_id: string; label: string; }
+export interface ResolvedConnectorAgent { agent: ResolvedHostedAgent; adapter_meta: { connector_grant_id: string; grant_family_id: string; client_id: string; audience: string; scopes: string[] }; }
+export type ConnectorResolveError = { kind: "missing_bearer" } | { kind: "invalid_bearer_shape" } | { kind: "token_not_found" } | { kind: "token_revoked_or_expired"; status: string } | { kind: "wrong_resource"; expected: string; actual: string } | { kind: "credential_not_active" } | { kind: "account_inactive" } | { kind: "tenant_link_inactive" };
+export async function ensureDefaultHostedAgentPolicy(..._a: any[]): Promise<{ ok: true; created: boolean } | { ok: false; reason: "governance_key_unavailable" | "policy_encrypt_failed" }> { return { ok: false, reason: "governance_key_unavailable" }; }
+export async function loadConsentPolicyMap(..._a: any[]): Promise<Record<string, MirroredStoredPolicy>> { return {}; }
+export async function resolveConnectorAccessTokenForResource(..._a: any[]): Promise<ResolvedConnectorAgent | { error: ConnectorResolveError }> { return { error: { kind: "token_not_found" } }; }

@@ -1,0 +1,10 @@
+{
+  "name": "@verity-one/browser-capture-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Verity One browser capture extension shell",
+  "scripts": {
+    "test": "bun test"
+  }
+}

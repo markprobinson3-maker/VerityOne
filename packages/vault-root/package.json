@@ -1,0 +1,14 @@
+{
+  "name": "@verity-one/vault-root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dependency-light local vault root resolver and inspector.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "types": "./src/index.d.ts"
+}

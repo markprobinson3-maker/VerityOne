@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="The hosted portal at verityone.app/my is not live yet. Google sign-in and the tenant portal are later-phase work. Today, verityone.app serves the public site and the release channel; the interactive surface is the local dashboard on your own machine.">
+<title>Verity One — Hosted portal (not live yet)</title>
+<style>:root {
+  --bg: #021008;
+  --bg-raised: #0b2012;
+  --bg-secondary: #06170c;
+  --border: #3a3526;
+  --border-strong: #5f5a4a;
+  --text: #e8dcc0;
+  --text-secondary: #b8ad94;
+  --text-muted: #8a836f;
+  --accent: #d4a857;
+  --accent-soft: rgba(212,168,87,0.13);
+  --accent-fg: #1c1408;
+  --green: #8bd49c;
+  --amber: #ffb454;
+  --red: #d97757;
+  --highlight: #9bbf9f;
+  --radius: 3px;
+  --radius-sm: 2px;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', 'Fira Code', ui-monospace, monospace;
+
+  /* ── Legacy aliases (preserve existing renderer markup) ── */
+  /* Old surface names */
+  --card: #0b2012;
+  --bg-card: #0b2012;
+  --card2: #06170c;
+  /* Old text names */
+  --dim: #b8ad94;
+  --muted: #8a836f;
+  /* Old semantic names */
+  --err: #d97757;
+  --warn: #ffb454;
+}
+/* ── vo-ui-style-system-v1 :: public homepage (site) extras ── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: .88em;
+  background: var(--bg-secondary);
+  padding: .1em .35em;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.site-wrap { max-width: 1040px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* ── Header ── */
+.site-header {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  padding: .95rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.site-header-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+}
+.site-brand {
+  font-weight: 700; font-size: 1.05rem; letter-spacing: -.01em;
+  color: var(--text);
+}
+.site-brand:hover { text-decoration: none; }
+.site-brand-mark {
+  font-family: var(--font-mono); font-size: .65rem;
+  color: var(--text-muted); margin-left: .4rem;
+  text-transform: uppercase; letter-spacing: .12em;
+}
+.site-nav { display: flex; gap: .1rem; flex-wrap: wrap; }
+.site-nav a {
+  padding: .4rem .72rem; font-size: .88rem;
+  color: var(--text-secondary); border-radius: var(--radius-sm);
+}
+.site-nav a:hover {
+  color: var(--text); background: var(--bg-secondary);
+  text-decoration: none;
+}
+
+/* ── Kicker (label above section titles) ── */
+.site-kicker {
+  font-size: .72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .14em;
+  color: var(--text-muted); margin-bottom: .45rem;
+}
+
+/* ── Hero ── */
+.site-hero {
+  padding: 3.5rem 0 3rem;
+  border-bottom: 1px solid var(--border);
+}
+.site-hero-grid {
+  display: grid; grid-template-columns: 1.2fr 1fr;
+  gap: 2.25rem; align-items: center;
+}
+.site-hero-headline {
+  font-size: 2.3rem; font-weight: 700; line-height: 1.15;
+  letter-spacing: -.015em; margin: .5rem 0 1.1rem;
+  color: var(--text); max-width: 22ch;
+}
+.site-hero-subhead {
+  font-size: 1.05rem; color: var(--text-secondary);
+  max-width: 58ch; margin-bottom: 1.6rem; line-height: 1.55;
+}
+.site-cta-row { display: flex; gap: .7rem; flex-wrap: wrap; }
+.site-cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: .7rem 1.15rem; font-size: .92rem; font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: opacity .14s, background .14s, border-color .14s;
+}
+.site-cta-primary { background: var(--accent); color: #ffffff; }
+.site-cta-primary:hover { opacity: .9; text-decoration: none; }
+.site-cta-ghost {
+  background: transparent; color: var(--text);
+  border-color: var(--border-strong);
+}
+.site-cta-ghost:hover {
+  background: var(--bg-secondary); border-color: var(--text-secondary);
+  text-decoration: none;
+}
+.site-hero-visual {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.2rem;
+}
+.site-hero-visual svg { width: 100%; height: auto; display: block; }
+
+/* ── Section rhythm ── */
+.site-section {
+  padding: 3.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.site-section-soft { background: var(--bg-secondary); }
+.site-section h2 {
+  font-size: 1.55rem; font-weight: 700; letter-spacing: -.01em;
+  margin-bottom: 1rem; color: var(--text);
+}
+.site-lead {
+  font-size: 1rem; color: var(--text-secondary);
+  max-width: 60ch; margin-bottom: 1.6rem;
+}
+
+/* ── Prose ── */
+.site-prose p {
+  margin-bottom: 1rem; max-width: 70ch;
+  color: var(--text-secondary);
+}
+.site-prose p:last-child { margin-bottom: 0; }
+.site-prose strong { color: var(--text); font-weight: 600; }
+
+/* ── Getting-started paths ── */
+.site-paths {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  margin-top: .5rem;
+}
+.site-path {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.3rem 1.4rem;
+  display: flex; flex-direction: column; gap: .55rem;
+}
+.site-path h3 { font-size: 1rem; font-weight: 600; color: var(--text); }
+.site-path-caption {
+  font-size: .88rem; color: var(--text-secondary);
+  margin-bottom: .4rem; line-height: 1.55;
+}
+.site-steps {
+  list-style: decimal; padding-left: 1.25rem;
+  font-size: .9rem; color: var(--text-secondary); line-height: 1.7;
+}
+.site-steps li { margin-bottom: .08rem; }
+.site-path-link { margin-top: auto; font-size: .88rem; }
+
+/* ── Use cases ── */
+.site-usecases {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+}
+.site-usecase {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.3rem 1.4rem;
+}
+.site-usecase h3 {
+  font-size: 1rem; font-weight: 600; color: var(--text);
+  margin-bottom: .25rem;
+}
+.site-usecase-tag {
+  font-size: .7rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text-muted); margin-bottom: .75rem;
+}
+.site-usecase p {
+  font-size: .93rem; color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ── System diagram layout ── */
+.site-system {
+  display: grid; grid-template-columns: 1.2fr 1fr;
+  gap: 1.75rem; align-items: start;
+}
+.site-system-diagram {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem;
+  overflow-x: auto;
+}
+.site-system-diagram svg {
+  width: 100%; height: auto; display: block; min-width: 540px;
+}
+
+/* ── Trust + authority ── */
+.site-trust {
+  font-size: 1rem; color: var(--text);
+  max-width: 72ch; margin-bottom: 1.75rem; line-height: 1.6;
+}
+.site-authority {
+  display: grid; grid-template-columns: minmax(190px, 1fr) 2fr;
+  gap: .65rem 1.25rem;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.4rem;
+}
+.site-authority dt {
+  font-size: .92rem; font-weight: 600; color: var(--text);
+}
+.site-authority dd {
+  font-size: .9rem; color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ── Deeper links ── */
+.site-links {
+  list-style: none; padding: 0;
+  display: grid; gap: .4rem;
+}
+.site-links li { font-size: .95rem; }
+.site-links a { color: var(--accent); }
+
+/* ── Footer ── */
+.site-footer {
+  padding: 1.85rem 0;
+  background: var(--bg-raised);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted); font-size: .85rem;
+}
+.site-footer p { margin-bottom: .25rem; }
+.site-footer-meta {
+  font-family: var(--font-mono); font-size: .72rem;
+  color: var(--text-muted); opacity: .75;
+}
+
+/* ── Responsive ── */
+@media (max-width: 880px) {
+  .site-hero { padding: 2.5rem 0 2.25rem; }
+  .site-hero-grid { grid-template-columns: 1fr; gap: 1.5rem; }
+  .site-paths { grid-template-columns: 1fr; }
+  .site-usecases { grid-template-columns: 1fr; }
+  .site-system { grid-template-columns: 1fr; }
+  .site-hero-headline { font-size: 1.8rem; }
+  .site-nav { justify-content: flex-start; }
+}
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="site-wrap site-header-inner">
+    <a class="site-brand" href="/">Verity One<span class="site-brand-mark">vo</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/start">Getting started</a>
+      <a href="/#how">How it works</a>
+      <a href="/#trust">Trust</a>
+      <a href="/my" aria-current="page">Hosted</a>
+      <a href="https://github.com/markprobinson3-maker/VerityOne" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="site-section">
+    <div class="site-wrap">
+      <p class="site-kicker">Hosted portal</p>
+      <h1><code>/my</code> &mdash; not live yet</h1>
+      <div class="site-prose">
+        <p><strong>The hosted portal is not live yet.</strong> This URL
+        is reserved so that homepage and <a href="/start"><code>/start</code></a>
+        links resolve, but there is no sign-in here, no account, no
+        hosted dashboard. Nothing on this page is a working feature.</p>
+        <p>The pieces that will eventually live here &mdash; <strong>Google
+        sign-in</strong>, the <strong>tenant portal</strong>, the hosted
+        audit surface, and the queued-intent inbox &mdash; are explicitly
+        later-phase work. They depend on the full Verity One runtime
+        (database, auth, workers), which this bootstrap deploy does not
+        expose and will not pretend to expose.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="site-section site-section-soft">
+    <div class="site-wrap">
+      <p class="site-kicker">What works today</p>
+      <h2>Use these instead</h2>
+      <dl class="site-authority" aria-label="What is live today on verityone.app">
+        <dt>Local dashboard</dt>
+        <dd>Runs on your own machine at
+          <a href="http://127.0.0.1:3100/dashboard"><code>http://127.0.0.1:3100/dashboard</code></a>
+          once you have installed Verity One. This is the interactive
+          surface today &mdash; it is not on <code>verityone.app</code>,
+          and your local node stays authoritative.</dd>
+        <dt>Install &amp; update</dt>
+        <dd><a href="https://download.verityone.app/">download.verityone.app</a>
+          is the canonical install and update origin. The apex
+          <a href="/download">/download</a> page remains a compatibility
+          landing page, and the mirrored apex manifest is at
+          <a href="/releases/stable.json"><code>/releases/stable.json</code></a>.</dd>
+        <dt>Public site</dt>
+        <dd><a href="/">verityone.app/</a> and
+          <a href="/start">verityone.app/start</a> explain the product
+          and the three onboarding paths. They are static pages; they
+          do not require sign-in.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="site-section">
+    <div class="site-wrap">
+      <p class="site-kicker">Why a placeholder</p>
+      <h2>Honest route reservation</h2>
+      <div class="site-prose">
+        <p>Every link from the homepage and <code>/start</code> to
+        <code>/my</code> is intentional &mdash; <code>/my</code> is where
+        the hosted portal will live when it ships. For this bootstrap PR
+        the route is reserved with this holding page so that:</p>
+        <ul class="site-steps" style="list-style: disc;">
+          <li>No public link 404s on <code>verityone.app</code>.</li>
+          <li>Visitors see the state named honestly, not a mystery
+            blank page or a fake sign-in.</li>
+          <li>When the hosted portal PR lands, the route swap is a
+            single file replacement &mdash; no copy on the homepage
+            or <code>/start</code> has to change.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="site-wrap">
+    <p>Verity One &middot; hosted portal &middot; later-phase work.</p>
+    <p class="site-footer-meta">vo-ui-style-system-v1 &middot; hosted palette &middot; /my (placeholder)</p>
+  </div>
+</footer>
+</body>
+</html>

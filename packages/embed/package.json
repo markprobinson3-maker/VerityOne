@@ -1,0 +1,21 @@
+{
+  "name": "@verity-one/embed",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-only embedding helper + DB-backed cache + write-safety contract (rung F7).",
+  "exports": {
+    ".": {
+      "require": "./src/index.cjs",
+      "node": "./src/index.js",
+      "import": "./src/index.js",
+      "default": "./src/index.js",
+      "types": "./src/index.ts",
+      "bun": "./src/index.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@verity-one/db-pool": "file:../db-pool"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "channel": "stable",
+  "version": "0.1.2",
+  "published_at": "2026-05-21T22:15:56.910Z",
+  "download_url": "https://download.verityone.app/",
+  "notes_url": "https://releases.verityone.app/0.1.1/",
+  "artifacts": {},
+  "install": {
+    "mode": "source",
+    "repo_url": "https://github.com/markprobinson3-maker/VerityOne.git",
+    "source_kind": "commit",
+    "source_ref": "5e2f6f7c07f5b0ad4add1b96a5fd8bdf39e43c3d",
+    "bootstrap_steps": [
+      {
+        "kind": "bun_install"
+      }
+    ]
+  },
+  "packages": []
+}

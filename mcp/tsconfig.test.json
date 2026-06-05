@@ -1,0 +1,10 @@
+{
+  "_comment_why": "Test-only typecheck config — VO-MCP-CLEAN-BUILD-HARDENING-PR-1. The production tsconfig.json excludes `src/**/*.test.ts` so `bun run build` stays closed over Node runtime types. This config re-includes the test files and adds Bun runtime types so `bun test` source is still type-checked by `tsc --noEmit`. Runs explicitly via `bun run typecheck:test` — `bun test` itself does not consult either tsconfig for file discovery or strict checking.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["bun", "node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

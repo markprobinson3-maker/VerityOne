@@ -1,0 +1,21 @@
+{
+  "name": "@verity-one/miners",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "qc": "bun run src/qc-sentinel.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@verity-one/db-pool": "workspace:*",
+    "@verity-one/embed": "workspace:*",
+    "@verity-one/graph-shape": "workspace:*",
+    "cron-parser": "^5.5.0",
+    "dotenv": "^16.4.0",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

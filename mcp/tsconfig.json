@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": false,
+    "removeComments": false,
+    "newLine": "lf"
+  },
+  "include": ["src/**/*"],
+  "_comment_exclude": "Bun test files (*.test.ts) are deliberately excluded from the Node production build. They import `bun:test` and reference the global `Bun` namespace, neither of which is in the declared runtime types: mcp/package.json carries only @types/node + typescript as devDependencies, and the production bundle runs under Node (never Bun). `bun test` discovers `src/**/*.test.ts` directly without consulting tsconfig include/exclude, so this scoping preserves test coverage while keeping the runtime build closed over its declared types. Without this exclude, a clean checkout where Bun's auto-injected globals are not resolved fails with 'Cannot find module bun:test' / 'Cannot find name Bun' even though `bun test` itself still works.",
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}

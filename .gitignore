@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.local
+security/keys/
+*.log
+.DS_Store
+.turbo/
+
+# Vercel CLI machine-local state — never commit. `vercel link`
+# writes project metadata + auth tokens here.
+.vercel/
+.vercel
+.env*.local
+
+api/scripts/out/
+
+# Operator checkpoint files; final proof artifacts are committed separately.
+docs/foundation/*.partial
+docs/foundation/*.tmp-*
+
+# Acceptance-harness run artifacts (per-run, never committed).
+agent-lab/scripts/ta1-acceptance/ta1_acceptance_summary.json
