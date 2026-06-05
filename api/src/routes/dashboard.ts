@@ -3104,7 +3104,7 @@ dashboard.patch("/account/sync/preferences", async (c) => {
       next: result.next,
     });
   } catch (e: any) {
-    if (e?.code === "payment_required") return errorJson(c, "payment_required", { message: "VO+ is required for project and vault sync preferences." });
+    if (e?.code === "payment_required") return errorJson(c, "payment_required", { message: "Project and vault sync preferences require the Verity One hosted layer." });
     if (e?.code === "invalid_project_selection") return errorJson(c, "invalid_request", { message: "invalid_project_selection" });
     return errorJson(c, "invalid_request", { message: "Sync preference update failed." });
   }
@@ -3271,7 +3271,7 @@ async function assertDriveMirrorEntitlement(input: {
   return {
     ok: false,
     code: "payment_required",
-    message: "VO+ is required for Google Drive vault mirror.",
+    message: "The Google Drive vault mirror requires the Verity One hosted layer.",
     details: { manage_url: `${(input.credential?.hosted_base_url || "https://verityone.app").replace(/\/$/, "")}/my/account#vo-plus` },
   };
 }
@@ -11906,9 +11906,9 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
         .then(function(data) {
           if (!data) return;
           if (data.ok) fetchAccount({ force: true });
-          else { alert(data.message || data.error || 'Unable to refresh VO+ status'); entRefresh.disabled = false; }
+          else { alert(data.message || data.error || 'Unable to refresh status'); entRefresh.disabled = false; }
         })
-        .catch(function(err) { alert('Unable to refresh VO+ status: ' + err.message); entRefresh.disabled = false; });
+        .catch(function(err) { alert('Unable to refresh status: ' + err.message); entRefresh.disabled = false; });
     });
 
     var driveStart = content.querySelector('[data-drive-connect-start]');
@@ -12162,7 +12162,7 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
     } else if (connect.status === 'error' || connect.status === 'hosted_unreachable') {
       html += '<p style="font-size:.82rem;color:var(--dim);line-height:1.55;margin:.2rem 0 .75rem">Hosted connection could not be completed. Check your internet connection and retry.</p>';
     } else {
-    html += '<p style="font-size:.82rem;color:var(--dim);line-height:1.55;margin:.2rem 0 .75rem">Use one Google account for hosted VO+ and this local VO. The browser session lives on <code>verityone.app</code>; after linking, this dashboard mirrors the same account, tenant, device, and sync state without using the hosted cookie as local authority.</p>';
+    html += '<p style="font-size:.82rem;color:var(--dim);line-height:1.55;margin:.2rem 0 .75rem">This local node works on its own. Optionally, sign in with one Google account to connect it to the Verity One hosted layer (cross-device audit, project sync, and Drive mirror). The browser session lives on <code>verityone.app</code>; after linking, this dashboard mirrors the same account, tenant, device, and sync state without using the hosted cookie as local authority.</p>';
     }
     if (d.hosted_account_error && d.hosted_account_error.message) {
       html += '<div class="alert alert-warn" style="margin:.4rem 0 .65rem">' + esc(d.hosted_account_error.message) + '</div>';
@@ -12188,14 +12188,14 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
     var planLabel = entitlement.source === 'admin_override' ? 'Admin'
       : entitlement.vo_plus_active ? 'VO+'
       : entitlement.source === 'free_google' ? 'Free Google'
-      : 'Unknown';
+      : 'Local';
     var heavyActive = entitlement.heavy_sync_active === true;
     var heavyState = entitlement.health === 'available' ? 'Available'
       : entitlement.health === 'grace_active' ? 'Grace active'
       : entitlement.health === 'paused_vo_plus_required' ? 'Paused - VO+ required'
       : entitlement.health === 'hosted_unreachable' ? 'Hosted unreachable'
-      : 'Unknown';
-    html += '<div class="card card-dither" data-entitlement-card><div class="card-title">VO+ capability</div>';
+      : 'Local node';
+    html += '<div class="card card-dither" data-entitlement-card><div class="card-title">Hosted sync</div>';
     html += '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.55rem">';
     html += '<span class="badge ' + (heavyActive ? 'badge-ok' : 'badge-warn') + '">' + esc(planLabel) + '</span>';
     html += '<span style="font-size:.78rem;color:var(--dim)">' + esc(heavyState) + '</span>';
@@ -12209,12 +12209,12 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
     var driveControlsDisabled = !heavyActive || !!driveDisabledReason;
     html += '</div>';
     html += summaryRow('Graph sync', 'Enabled');
-    html += summaryRow('Project sync', heavyActive ? 'Enabled' : 'VO+ required');
-    html += summaryRow('Vault metadata', heavyActive ? 'Enabled' : 'VO+ required');
-    html += summaryRow('Google Drive vault mirror', driveDisabledReason ? driveDisabledReason : (heavyActive ? 'Available' : 'VO+ required'));
+    html += summaryRow('Project sync', heavyActive ? 'Enabled' : 'Hosted only');
+    html += summaryRow('Vault metadata', heavyActive ? 'Enabled' : 'Hosted only');
+    html += summaryRow('Google Drive vault mirror', driveDisabledReason ? driveDisabledReason : (heavyActive ? 'Available' : 'Hosted only'));
     html += '<div class="inline-form" style="gap:.45rem;align-items:center;margin-top:.65rem">';
-    html += '<button class="btn-sm btn-ghost" type="button" data-entitlement-refresh>Refresh VO+ status</button>';
-    html += '<a class="btn-sm btn-ghost" href="' + esc(entitlement.manage_url || hostedAccountUrl + '#vo-plus') + '" target="_blank" rel="noopener">Manage VO+</a>';
+    html += '<button class="btn-sm btn-ghost" type="button" data-entitlement-refresh>Refresh status</button>';
+    html += '<a class="btn-sm btn-ghost" href="' + esc(entitlement.manage_url || hostedAccountUrl + '#vo-plus') + '" target="_blank" rel="noopener">Manage hosted</a>';
     html += '</div>';
     html += '</div>';
 
@@ -12238,7 +12238,7 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
     prefRow('Lightweight status', 'lightweight_status', true, true, 'connected protocol');
     prefRow('Account and governance', 'account_governance', !!(sp.account_governance && sp.account_governance.enabled), false, '');
     prefRow('Non-project graph memory', 'non_project_graph', !!(sp.non_project_graph && sp.non_project_graph.enabled), false, '');
-    prefRow('Projects', 'projects_enabled', !!projPref.requested_enabled, !heavyActive && !projPref.requested_enabled, heavyActive ? '' : 'VO+ required');
+    prefRow('Projects', 'projects_enabled', !!projPref.requested_enabled, !heavyActive && !projPref.requested_enabled, heavyActive ? '' : 'Hosted only');
     html += '<div class="summary-row" style="font-size:.76rem;color:var(--dim)"><span class="summary-label">Selected projects</span><span class="summary-value">' + esc(String(selectedProjectCount)) + '</span></div>';
     html += '<div style="margin:.35rem 0 .55rem;padding-left:.75rem;border-left:1px solid var(--border)">';
     if (projectOptions.length === 0) {
@@ -12248,7 +12248,7 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
         var po = projectOptions[pi];
         var alreadySelected = !!selectedProjects[po.addr];
         var disabled = !alreadySelected && (!heavyActive || !po.eligible);
-        var reason = !heavyActive && !alreadySelected ? 'VO+ required' : (!po.eligible ? 'Local only' : '');
+        var reason = !heavyActive && !alreadySelected ? 'Hosted only' : (!po.eligible ? 'Local only' : '');
         html += '<label style="display:flex;align-items:center;justify-content:space-between;gap:.65rem;padding:.24rem 0;font-size:.8rem;color:' + (disabled ? 'var(--dim)' : 'var(--text)') + '">';
         html += '<span>' + esc(po.label || po.addr) + (reason ? ' <span style="font-size:.72rem;color:var(--dim)">(' + esc(reason) + ')</span>' : '') + '</span>';
         html += '<input type="checkbox" data-sync-project-addr="' + esc(po.addr) + '" ' + (alreadySelected ? 'checked ' : '') + (disabled ? 'disabled ' : '') + '>';
@@ -12259,10 +12259,10 @@ ${buildStyleBlock("local", LOCAL_SHELL_EXTRAS)}
       html += '<div style="font-size:.76rem;color:var(--warn);margin-top:.35rem">No projects selected.</div>';
     }
     html += '</div>';
-    prefRow('Vault metadata', 'vault_metadata', !!vaultPref.requested_enabled, !heavyActive && !vaultPref.requested_enabled, heavyActive ? '' : 'VO+ required');
-    prefRow('Google Drive mirror', 'drive_mirror', !!drivePref.requested_enabled, driveControlsDisabled && !drivePref.requested_enabled, driveDisabledReason || (heavyActive ? '' : 'VO+ required'));
-    prefRow('Vault dossiers', 'vault_dossiers', !!dossierPref.requested_enabled, (driveControlsDisabled || !!dossierPref.disabled_reason) && !dossierPref.requested_enabled, dossierPref.disabled_reason || driveDisabledReason || (heavyActive ? '' : 'VO+ required'));
-    prefRow('Raw/capture files', 'raw_capture_files', !!rawPref.requested_enabled, (driveControlsDisabled || !!rawPref.disabled_reason) && !rawPref.requested_enabled, rawPref.disabled_reason || driveDisabledReason || (heavyActive ? '' : 'VO+ required'));
+    prefRow('Vault metadata', 'vault_metadata', !!vaultPref.requested_enabled, !heavyActive && !vaultPref.requested_enabled, heavyActive ? '' : 'Hosted only');
+    prefRow('Google Drive mirror', 'drive_mirror', !!drivePref.requested_enabled, driveControlsDisabled && !drivePref.requested_enabled, driveDisabledReason || (heavyActive ? '' : 'Hosted only'));
+    prefRow('Vault dossiers', 'vault_dossiers', !!dossierPref.requested_enabled, (driveControlsDisabled || !!dossierPref.disabled_reason) && !dossierPref.requested_enabled, dossierPref.disabled_reason || driveDisabledReason || (heavyActive ? '' : 'Hosted only'));
+    prefRow('Raw/capture files', 'raw_capture_files', !!rawPref.requested_enabled, (driveControlsDisabled || !!rawPref.disabled_reason) && !rawPref.requested_enabled, rawPref.disabled_reason || driveDisabledReason || (heavyActive ? '' : 'Hosted only'));
     var drive = d.drive_mirror || {};
     var driveState = drive.state || {};
     var driveStats = driveState.stats || {};
