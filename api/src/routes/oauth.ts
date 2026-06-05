@@ -471,7 +471,7 @@ fieldset{border:0;padding:0;margin:0}legend{font-weight:700;margin-bottom:.35rem
 </head><body>
 <h1>Authorize Connector</h1>
 <div class="card">
-  <p>An OAuth client is requesting connector access to your VO+ tenant.</p>
+  <p>An OAuth client is requesting connector access to your Verity One tenant.</p>
   ${args.client_name ? `<p><strong>Client name:</strong> ${escapeHtml(args.client_name)}</p>
   <p class="dim">This name was provided by the client during registration and has not been verified by VO.</p>` : ""}
   <p><strong>Client ID:</strong> <code>${escapeHtml(args.client_id)}</code></p>

@@ -82,7 +82,7 @@ export function resolveEffectiveSyncPreferences(
   const driveDisabledReason = tierBlocksDrive
     ? "Drive mirror is not supported for content_opaque tenants"
     : driveRequested && !driveEnabled
-      ? "Drive consent or VO+ required"
+      ? "Needs Drive consent or the hosted layer"
       : null;
   const summary: SyncPreferenceSummary = {
     master_enabled: settings.hosted_sync === "outbound",
