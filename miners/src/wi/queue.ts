@@ -89,7 +89,7 @@ export async function dequeue(): Promise<Array<{ id: string; url: string; source
     RETURNING id, url, source_type
   `;
 
-  return items;
+  return items as any;
 }
 
 // ============================================================

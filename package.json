@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@vercel/blob": "^2.3.3",
+    "smol-toml": "^1.3.1",
     "@verity-one/crypto-hash": "workspace:*",
     "@verity-one/db-pool": "workspace:*",
     "@verity-one/embed": "workspace:*",
