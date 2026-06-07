@@ -68,12 +68,10 @@ import { selectVisibleGraphCounts, selectVisiblePyramidSummaries } from "./lib/v
 import {
   mergeVary,
   prefersHtml,
-  readDownloadPageHtml,
-  readHomepageHtml,
   serveLiveStableManifest,
   serveLocalSnapshotStableManifest,
 } from "./routes/site";
-import { renderStartPage } from "./routes/site-start";
+import { registerWebsiteRoutes, renderMarketingHomepageHtml } from "./website-routes";
 import { requireVoEnabled, gatePublicResonance, enforceRecallScope, enforceWritePermission } from "./lib/tenant-settings-middleware";
 import { hostedRateLimit } from "./lib/hosted-rate-limit";
 
@@ -276,7 +274,7 @@ const ROUTE_SOURCE_FILES = [
   "routes/schema.ts",
   "routes/search.ts",
   "routes/signal.ts",
-  "routes/site-start.ts",
+  "website-routes.ts",
   "routes/site.ts",
   "routes/subgraph.ts",
   "routes/supercron.ts",
@@ -416,7 +414,10 @@ app.get("/", async (c) => {
   // Origin both end up in the single Vary header.
   c.header("Vary", mergeVary(c.res.headers.get("Vary"), "Accept"));
   if (prefersHtml(c.req.header("accept"))) {
-    return c.html(readHomepageHtml());
+    // Marketing homepage lives behind the website seam (VO+ only). OSS core
+    // returns null -> fall through to the JSON discovery surface.
+    const homepage = renderMarketingHomepageHtml();
+    if (homepage != null) return c.html(homepage);
   }
   const access = getAccessContext(c);
   const accessLevels = allowedRegistryAccessLevels(c);
@@ -499,7 +500,9 @@ app.get("/", async (c) => {
 // Unconditionally HTML. This is the canonical human onboarding surface;
 // /connect and /schema remain strict JSON endpoints and are not proxied
 // through here. See api/src/routes/site-start.ts.
-app.get("/start", (c) => c.html(renderStartPage()));
+// Marketing site routes (/start, /download, ...) are mounted by the website
+// seam — a no-op in the OSS build (the marketing site is not part of core VO).
+registerWebsiteRoutes(app);
 
 // ─── Public release channel (VO-VERCEL-RELEASE-CHANNEL-BOOTSTRAP-PR-1) ──
 //
@@ -508,7 +511,6 @@ app.get("/start", (c) => c.html(renderStartPage()));
 // Vercel serves these same files statically; mounting them on the
 // local Hono app keeps the contract dogfooded (local dev / integration
 // tests exercise the same bytes Vercel will ship).
-app.get("/download", (c) => c.html(readDownloadPageHtml()));
 // `/releases/stable.json` must mean the SAME thing on local as it
 // does on hosted — the live authoritative manifest. Local proxies
 // the Vercel-hosted copy; no silent fallback to the embedded
