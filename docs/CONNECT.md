@@ -43,11 +43,12 @@ curl -s http://localhost:3100/health    # should return {"ok":true,...}
 
 Hand `docs/INGEST-FOR-AGENTS.md` to your coding agent (Claude Code, Codex, Cursor, etc.) and tell it which directory to walk. The agent classifies each Markdown file as a **project memory** or **day memory**, atomizes it into individual thoughts, and writes them to your local VO via `/remember`.
 
-For repo-scale content (whole codebases + docs trees) use the built-in path:
+The same agent-driven path scales to whole codebases + docs trees: point the
+agent at the repo root and let it walk the tree, writing through `/remember` and
+(for memories that carry source provenance or project scope) `/memory/write`.
 
-```bash
-vo ingest --repo /path/to/repo
-```
+> A one-command `vo ingest --repo …` exists in the full operator `vo` CLI, which
+> is **not** part of the OSS source install — use the agent-driven path above.
 
 ---
 
@@ -109,10 +110,11 @@ If your client uses a non-standard OAuth callback URL, `https://...` callbacks a
 If you'd rather connect a desktop MCP client straight to your local VO with full read+write (skipping the queue-only intent gate):
 
 ```bash
-vo mcp onboard --client claude-desktop   # or: codex / generic
+bun install --cwd mcp && bun run --cwd mcp build   # one-time build
+vo-mcp install --client claude-desktop             # or: codex / generic
 ```
 
-That builds, installs, and verifies the stdio MCP server. Restart the client. To check health later: `vo mcp doctor`.
+That installs the stdio MCP server config for the client (build it once first, as shown). Restart the client. To check health later: `vo-mcp doctor`.
 
 ---
 
@@ -170,12 +172,13 @@ If the client uses a non-standard OAuth callback URL, registration may fail with
 Requires you to have a local VO node running (`api/src/index.ts` on `127.0.0.1:3100`).
 
 ```bash
-vo mcp onboard --client claude-desktop   # or: codex / generic
+bun install --cwd mcp && bun run --cwd mcp build   # one-time build
+vo-mcp install --client claude-desktop             # or: codex / generic
 ```
 
-That single command builds, installs, and verifies the stdio MCP server for your chosen client. Restart the client and you're done.
+Build the MCP package once (first line), then `vo-mcp install` wires the stdio MCP server config for your chosen client. Restart the client and you're done.
 
-To check setup health later: `vo mcp doctor`. To re-run: same command with `--force`.
+To check setup health later: `vo-mcp doctor`. To re-run install: same command with `--force`.
 
 ---
 

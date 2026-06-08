@@ -159,9 +159,17 @@ ok "tenant row + graph_spaces overlay present"
 if [ -f "$ENV_FILE" ] && grep -q '^VERITY_AGENT_TOKENS=' "$ENV_FILE" 2>/dev/null; then
   step "$ENV_FILE already has VERITY_AGENT_TOKENS — leaving it untouched"
   warn "If a fresh tenant token is needed, delete the file and re-run."
-  # Read tokens back from the existing env file for the summary at the end.
-  EXISTING_AGENT_TOKEN=$(awk -F'=' '/^VERITY_AGENT_TOKENS=/ {sub(/^VERITY_AGENT_TOKENS=/,""); split($0,a,/=/); print a[1]; exit}' "$ENV_FILE")
-  TENANT_TOKEN="$EXISTING_AGENT_TOKEN"
+  # Read tokens back from the existing env file for the summary + config heal.
+  # The value is `agentId:token` (colon-separated; api/src/lib/access.ts maps the
+  # substring AFTER the last colon to the agentId on its left). The MCP bearer is
+  # that TOKEN alone — NOT the whole `agentId:token` pair. The earlier reader split
+  # on '=' (never present) and captured the full pair, so a rerun wrote
+  # `agentId:token` as the bearer and every request 401'd. Parse with the colon.
+  EXISTING_PAIR=$(grep -m1 '^VERITY_AGENT_TOKENS=' "$ENV_FILE")
+  EXISTING_PAIR=${EXISTING_PAIR#VERITY_AGENT_TOKENS=}   # agentId:token[,more]
+  EXISTING_PAIR=${EXISTING_PAIR%%,*}                     # first agent's pair only
+  TENANT_TOKEN=${EXISTING_PAIR##*:}                      # bearer = after last colon
+  case "$EXISTING_PAIR" in *:*) AGENT_ID=${EXISTING_PAIR%:*} ;; esac  # recover agentId
   EXISTING_OP_TOKEN=$(awk -F'=' '/^VERITY_OPERATOR_TOKENS=/ {sub(/^VERITY_OPERATOR_TOKENS=/,""); print; exit}' "$ENV_FILE")
   OPERATOR_TOKEN="${EXISTING_OP_TOKEN:-unknown}"
 else
@@ -191,28 +199,54 @@ else
 fi
 
 # 12. $VO_DIR/config.json + $VO_DIR/agent-token for the vo CLI + the stdio MCP server.
-# config.json MUST carry agent_token: the stdio MCP server (mcp/src/config.ts)
-# reads ~/.vo/config.json#agent_token (or access_token, or VO_TOKEN) for its bearer.
-# Without it a connected agent gets `no_token` even though the node + token exist.
+# config.json MUST carry agent_token AND base_url: the stdio MCP server
+# (mcp/src/config.ts) reads ~/.vo/config.json#agent_token (or access_token, or
+# VO_TOKEN) for its bearer, and #base_url for the node URL. Without agent_token a
+# connected agent gets `no_token`; a custom URL under the wrong key is ignored.
 # config.json holds a bearer token, so write it owner-only (umask 077 / chmod 600).
 mkdir -p "$VO_DIR"
-if [ ! -f "$VO_DIR/config.json" ]; then
-  step "Writing $VO_DIR/config.json"
+VO_CONFIG="$VO_DIR/config.json"
+if [ ! -f "$VO_CONFIG" ]; then
+  step "Writing $VO_CONFIG"
   ( umask 077
-  cat > "$VO_DIR/config.json" <<EOF
+  cat > "$VO_CONFIG" <<EOF
 {
   "version": 1,
   "tenant_id": "$TENANT_ID",
   "agent_id": "$AGENT_ID",
   "agent_token": "$TENANT_TOKEN",
+  "base_url": "http://localhost:3100",
   "base": "http://localhost:3100",
   "hosted_sync": "off",
   "profile": "tenant-default"
 }
 EOF
   )
-  chmod 600 "$VO_DIR/config.json" 2>/dev/null || true
-  ok "$VO_DIR/config.json written (mode 0600, carries agent_token for stdio MCP)"
+  chmod 600 "$VO_CONFIG" 2>/dev/null || true
+  ok "$VO_CONFIG written (mode 0600, carries agent_token + base_url for stdio MCP)"
+else
+  # Self-heal: an existing config.json from an older installer may LACK
+  # agent_token (→ MCP returns no_token) or base_url (→ MCP ignores a custom
+  # base). Inject only the missing keys without disturbing the rest, then re-lock.
+  # Uses bun (already installed above) for a safe JSON merge.
+  step "$VO_CONFIG exists — ensuring it carries agent_token + base_url"
+  if VO_HEAL_TOKEN="$TENANT_TOKEN" bun -e '
+      const fs = require("fs"); const p = process.argv[1];
+      let c; try { c = JSON.parse(fs.readFileSync(p, "utf8")); } catch { console.log("unparseable"); process.exit(1); }
+      if (c === null || typeof c !== "object") { console.log("unparseable"); process.exit(1); }
+      let ch = false;
+      if (!c.agent_token && process.env.VO_HEAL_TOKEN) { c.agent_token = process.env.VO_HEAL_TOKEN; ch = true; }
+      const url = c.base_url || c.base || "http://localhost:3100";
+      if (!c.base_url) { c.base_url = url; ch = true; }
+      if (!c.base) { c.base = url; ch = true; }
+      if (ch) fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
+      console.log(ch ? "healed" : "complete");
+    ' "$VO_CONFIG" >/dev/null 2>&1; then
+    chmod 600 "$VO_CONFIG" 2>/dev/null || true
+    ok "$VO_CONFIG checked (agent_token + base_url present, mode 0600)"
+  else
+    warn "could not parse/patch $VO_CONFIG — confirm it has \"agent_token\" and \"base_url\""
+  fi
 fi
 if [ ! -f "$VO_DIR/agent-token" ]; then
   printf '%s' "$TENANT_TOKEN" > "$VO_DIR/agent-token"
@@ -233,9 +267,17 @@ VO_BIN_LINKED=""
 # "run build" hint until mcp/ is built — that build is a separate documented step
 # (see /start), so the symlink is created now and starts working once mcp/ builds.
 if [ -f "$REPO_DIR/mcp/bin/vo-mcp" ]; then
-  ln -sf "$REPO_DIR/mcp/bin/vo-mcp" "$BIN_DIR/vo-mcp"
-  ok "vo-mcp launcher linked ($BIN_DIR/vo-mcp -> mcp/bin/vo-mcp; works after you build mcp/)"
-  VO_BIN_LINKED="yes"
+  VO_MCP_LINK="$BIN_DIR/vo-mcp"
+  if [ -e "$VO_MCP_LINK" ] && [ ! -L "$VO_MCP_LINK" ]; then
+    # A real (non-symlink) file already lives here — do NOT clobber a user's
+    # unrelated `vo-mcp`. ln -sf would silently delete it.
+    warn "$VO_MCP_LINK already exists and is not a symlink — leaving it. Remove it and re-run to let bootstrap link the vo-mcp launcher, or run mcp/bin/vo-mcp by full path."
+  else
+    # Safe to (re)create: nothing there, or it is already a symlink we manage.
+    ln -sf "$REPO_DIR/mcp/bin/vo-mcp" "$VO_MCP_LINK"
+    ok "vo-mcp launcher linked ($VO_MCP_LINK -> mcp/bin/vo-mcp; works after you build mcp/)"
+    VO_BIN_LINKED="yes"
+  fi
 fi
 
 # 13b. `vo` CLI shim. The full `vo` CLI lives in agent-lab/ which is NOT in the

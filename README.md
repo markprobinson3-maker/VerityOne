@@ -129,72 +129,46 @@ path also requires `--allow-setup-backfill`.
 See `VO-FOUNDATION-RUNBOOK` for
 the full reset, drift, allowlist, and schema-baseline operating contract.
 
-### Tenant Init
+### Tenant init — already done by the installer
 
-Once the api is running, initialize your local VO config:
+The one-line installer (`scripts/bootstrap-local.sh`) already registers your
+tenant, writes `~/.vo/config.json` (with your agent token + `base_url`), and
+writes the operator/agent tokens into `.env`. There is nothing else to run to
+have a working local node.
 
-```bash
-# First-run setup — your token is provided by the VO operator
-bun run agent-lab/scripts/vo-cli.ts init --tenant <your-id> --token <your-token>
+### Connect your agents (the public path)
 
-# Verify everything works
-bun run agent-lab/scripts/vo-cli.ts doctor
-```
-
-The `--token` flag is the recommended way to provide your tenant token.
-It is persisted in `~/.vo/config.json` so subsequent CLI commands,
-MCP, and `vo doctor` can use it automatically. Env-var auth
-(`VERITY_AGENT_TOKENS` / `VERITY_AGENT_TENANTS`) still works as a
-fallback for advanced/CI use cases.
-
-### Set up AI models
+Agents reach the local node over the **stdio MCP server**, `vo-mcp` — the
+connect binary every install ships. Build the package once, then wire a client:
 
 ```bash
-bun run agent-lab/scripts/vo-cli.ts onboard
+bun install --cwd mcp && bun run --cwd mcp build
+vo-mcp install --client claude-desktop   # or: codex / generic
+vo-mcp doctor
 ```
 
-Novice-first flow. Asks for your AI provider API key, stores it locally
-in `~/.vo/secrets.env` (owner-only, never committed, never in
-`config.json`), and seeds recommended models for the four canonical VO
-tasks: **Fast source extraction**, **Fast ingest extraction**, **Draft
-review and cleanup**, **Deep synthesis**.
+The installer links `vo-mcp` into `~/.local/bin`, so the bare command resolves
+after the build (otherwise call `mcp/bin/vo-mcp`). See
+[`docs/CONNECT.md`](docs/CONNECT.md) and
+[`docs/VO-MCP-ACTIVATION.md`](docs/VO-MCP-ACTIVATION.md) for the full connect
+flow, and [`docs/INGEST-FOR-AGENTS.md`](docs/INGEST-FOR-AGENTS.md) for handing a
+coding agent your first sources to remember (it writes through the public HTTP
+API — `/remember` and `/memory/write`).
 
-```bash
-# Check readiness (Provider · Tasks · Secrets · Next step; secrets are redacted)
-bun run agent-lab/scripts/vo-cli.ts onboard-status
-
-# Engineering proof — safe rerun, secret isolation, surgical override
-bun run agent-lab/scripts/vo-cli.ts onboard-proof
-```
-
-Canonical command story for a first-time tenant:
-
-1. `vo init` — register local node, persist credentials
-2. `vo onboard` — set up AI models (API key + task routing)
-3. `vo onboard-status` — confirm readiness
-4. `vo doctor` — verify full stack is healthy
-
-### First harvest — one command
-
-```bash
-bun run agent-lab/scripts/vo-cli.ts vault init --root ~/knowledge --tenant <your-id>
-bun run agent-lab/scripts/vo-cli.ts vault harvest --auto --root ~/knowledge path/to/source.md
-```
-
-`--auto` runs the full capture → atomize → curate → confirm → graph
-write → finalize → log pipeline and ends with a short guided summary:
-
-```text
-Capture:     captures/abcd1234-source.md
-Dossier:     dossiers/abcd1234-source.dossier.md
-Graph write: fresh
-Doc link:    linked
-Next:        open the dossier in Obsidian
-```
-
-If something stops mid-run, the command tells you exactly what
-succeeded, what did not happen, and the next command to run. Add
-`--verbose` for the full stage transcript.
+> **Full operator CLI (`vo …`) — not part of this OSS source install.** The
+> commands below run the full Verity One CLI, which lives in a separate private
+> tree (`agent-lab/scripts/vo-cli.ts`) that is **not** included in this
+> distribution. They are kept here as the operator/internal reference only —
+> OSS users connect with `vo-mcp` (above) and ingest via
+> `docs/INGEST-FOR-AGENTS.md`:
+>
+> - `vo init --tenant <id> --token <token>` — register node + persist
+>   credentials (the installer already does this; `~/.vo/config.json` is the
+>   single source, with `VERITY_AGENT_TOKENS` env as a CI fallback).
+> - `vo onboard` / `vo onboard-status` — set up AI provider keys + task routing
+>   (stored owner-only in `~/.vo/secrets.env`, never in `config.json`).
+> - `vo vault init` / `vo vault harvest --auto` — the capture → atomize →
+>   curate → graph-write ingestion pipeline.
 
 ## Managed Runtime
 

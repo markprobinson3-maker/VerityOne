@@ -23,7 +23,7 @@ PKG_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
 CLI="$PKG_ROOT/dist/cli.js"
 if [ ! -f "$CLI" ]; then
   echo "vo-mcp: cli.js not found at $CLI" >&2
-  echo "vo-mcp: run 'npm run build' in $PKG_ROOT" >&2
+  echo "vo-mcp: build it first — 'bun run --cwd $PKG_ROOT build' (or 'npm run build' in $PKG_ROOT)" >&2
   exit 1
 fi
 exec node "$CLI" "$@"

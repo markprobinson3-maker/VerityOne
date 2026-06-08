@@ -58,7 +58,7 @@ export async function doctor(opts: DoctorOptions = {}): Promise<boolean> {
   if (!fs.existsSync(serverPath)) {
     process.stderr.write(
       `vo-mcp doctor: server not found at ${serverPath}\n` +
-        `vo-mcp doctor: run \`vo mcp install --client claude-desktop\` (or --client generic) first\n`,
+        `vo-mcp doctor: run \`vo-mcp install --client claude-desktop\` (or --client generic) first\n`,
     );
     return false;
   }
@@ -81,8 +81,8 @@ export async function doctor(opts: DoctorOptions = {}): Promise<boolean> {
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
 
-  const rl = readline.createInterface({ input: child.stdout! });
-  rl.on("line", (line) => {
+  const rl: any = readline.createInterface({ input: child.stdout! });
+  rl.on("line", (line: string) => {
     let msg: { id?: number; result?: unknown; error?: { message?: string } };
     try {
       msg = JSON.parse(line);
@@ -202,7 +202,7 @@ export async function doctor(opts: DoctorOptions = {}): Promise<boolean> {
         done = true;
         resolve();
       };
-      child.once("exit", finalize);
+      (child as any).once("exit", finalize);
       setTimeout(finalize, 2000);
     });
 

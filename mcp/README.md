@@ -201,48 +201,45 @@ refusal of `source: "system_generated"`, which is reserved for server-side
 writers. Everything else is backend-authoritative (or filesystem-honest in
 the vault case, or anonymously-restricted in the public-feed case).
 
-## Preferred tenant path: `vo mcp` (through the main `vo` CLI)
+## Preferred path: `vo-mcp` (standalone)
 
-This package's tenant-facing wiring is **Phase C** of the canonical
-first-run sequence taught at
-[`/start#shortest`](https://verityone.app/start#shortest). That page is
-the long-form authority; this section is the same sequence compressed
-for a package reader.
+This package ships a standalone launcher, **`vo-mcp`** (the bin at
+`mcp/bin/vo-mcp`). It is the connect path every install gets — the public
+source install does NOT include the full `vo` CLI (that lives in a private
+tree). The source-install bootstrap symlinks `vo-mcp` into `~/.local/bin`,
+so once this package is built the bare `vo-mcp …` command resolves.
 
-After `vo install` / `vo update` (Phase A) and `bun run db:reset` +
-`vo init` + `vo doctor` (Phase B), wire MCP with four commands — two
-manual build steps, then the two `vo mcp` wrappers. The source-install
-bootstrap only runs `bun install` at the repo root, and the repo-root
-workspaces deliberately omit `mcp/`, so a fresh install leaves this
-package unbuilt. Until the install bootstrap learns about the MCP
-package, build it by hand:
-
-Commands use the absolute install-root path so they work from any
-shell cwd (assuming the default `~/verity-one` install root — adjust
-if you installed elsewhere):
+The repo-root `bun install` does not build `mcp/` (the root workspaces
+deliberately omit it), so build it once, then install + verify. Commands
+use the absolute install-root path so they work from any shell cwd
+(assuming the default `~/verity-one` install root — adjust if you
+installed elsewhere):
 
 ```sh
 bun install --cwd ~/verity-one/mcp
 bun run --cwd ~/verity-one/mcp build
-vo mcp install --client claude-desktop
-vo mcp doctor
+vo-mcp install --client claude-desktop
+vo-mcp doctor
 ```
 
-`vo mcp install` / `vo mcp doctor` are thin wrappers over the same
-`install()` / `doctor()` functions this package exports; they call the
-library directly (no shell-out) and hand in a real Node binary + the
-package's built `dist/` so the install contract holds even when the `vo`
-CLI is running under Bun. Either path (`vo mcp …` or `vo-mcp …`) produces
-an identical `~/.vo/mcp/` layout and an identical Claude Desktop config
-entry.
+If `vo-mcp` is not yet on your `PATH`, call it by path —
+`~/verity-one/mcp/bin/vo-mcp …` (or `./bin/vo-mcp …` from inside this
+package); it is the same binary.
 
-Run `vo mcp install` **after** `vo init` — the MCP server resolves tenant
-auth from `~/.vo/config.json`, so sequencing matters. `vo mcp doctor` is
-independent of the repo build: it validates the *installed* copy under
-`~/.vo/mcp/`, so it keeps working even if the repo's `mcp/dist` is later
-rebuilt, deleted, or moved.
+Run `vo-mcp install` **after** tenant init — the MCP server resolves
+tenant auth from `~/.vo/config.json`, so sequencing matters. `vo-mcp
+doctor` validates the *installed* copy under `~/.vo/mcp/`, so it stays
+valid even if the repo's `mcp/dist` is later rebuilt, deleted, or moved.
 
-## Install direct (standalone binary, compatibility path)
+> **If you have the full private `vo` CLI** (not part of the OSS
+> distribution), `vo mcp install` / `vo mcp doctor` are equivalent thin
+> wrappers over the same `install()` / `doctor()` functions this package
+> exports — they hand the library a real Node binary so the contract holds
+> even when `vo` runs under Bun. `vo mcp …` and `vo-mcp …` produce an
+> identical `~/.vo/mcp/` layout and Claude Desktop config entry. Public
+> source installs should use the standalone `vo-mcp`.
+
+## Install direct (from inside the package)
 
 From inside this package:
 
@@ -296,9 +293,10 @@ adds them.
 ## Doctor
 
 ```sh
-vo mcp doctor      # preferred — through the main vo CLI
-# or, equivalent when using the standalone binary:
+vo-mcp doctor      # standalone — the public path
+# or, from inside the package:
 ./bin/vo-mcp doctor
+# (with the full private vo CLI, `vo mcp doctor` is equivalent)
 ```
 
 Spawns the installed MCP server, runs the 4-step MCP handshake
@@ -306,10 +304,10 @@ Spawns the installed MCP server, runs the 4-step MCP handshake
 vo_memory_recall`), verifies the registered tool surface, and prints a one-line
 summary.
 
-`vo mcp doctor` and `vo-mcp doctor` both invoke this package's
-`doctor()` function — the `vo` wrapper passes an explicit Node binary so
-the child process the doctor spawns is always Node ≥ 20 per contract,
-never Bun.
+`vo-mcp doctor` and `vo mcp doctor` (private CLI) both invoke this
+package's `doctor()` function — the `vo` wrapper passes an explicit Node
+binary so the child process the doctor spawns is always Node ≥ 20 per
+contract, never Bun.
 
 ### Client-aware doctor (read-only config check)
 
@@ -420,9 +418,10 @@ other directories.
 
 Tenant-facing entrypoints:
 
-- `vo mcp install` / `vo mcp doctor` — preferred, through the main `vo` CLI
-- `vo-mcp install` / `vo-mcp doctor` / `vo-mcp serve` — standalone binary
-  (compatibility, same library underneath)
+- `vo-mcp install` / `vo-mcp doctor` / `vo-mcp serve` — the standalone
+  binary; the default for the public source install
+- `vo mcp install` / `vo mcp doctor` — equivalent wrappers, available only
+  with the full private `vo` CLI (same library underneath)
 
 If this package starts re-implementing ranking, routing, validation, or
 storage logic, the rung is off course.

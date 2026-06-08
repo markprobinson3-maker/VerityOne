@@ -73,9 +73,23 @@ curl -s -X POST http://localhost:3100/remember \
   }'
 ```
 
-A successful response returns `{"ok": true, "addr": "PJ.0.3.NNNN", ...}`. Capture the `addr` and the source-file path so the user can trace any memory back to its origin.
+A successful response returns `{"ok": true, "addr": "PJ.0.3.NNNN", ...}`. Capture the `addr` to report back.
 
-VO deduplicates internally — if a memory is semantically identical to one already in the graph, the existing node is returned (no duplicate created). Don't pre-dedup yourself; just write.
+> **`/remember` is lossy by design — choose the right write surface.** It maps to
+> a tenant-scoped memory and **drops source references** (there is no field for a
+> source path) and cannot scope to a project. So:
+> - For quick, free-floating notes where provenance/scope don't matter, `/remember`
+>   is fine.
+> - For any memory that must carry its **source path** or land in a **project**,
+>   POST to **`/memory/write`** instead (it accepts `source_refs` and
+>   `project_addr`). Do **not** rely on `/remember` to preserve a source path — it
+>   is silently discarded.
+
+`/remember` also **deduplicates tenant-wide**: a write that is ≥0.85 similar to an
+existing *unscoped* tenant memory returns `{"ok": true, "deduplicated": true}`
+**without inserting**. That is the intended behavior, but it means a bulk run of
+distinct-but-similar notes can silently collapse — another reason to send
+memories that must each persist (with provenance) through `/memory/write`.
 
 ### Step 5 — report
 
