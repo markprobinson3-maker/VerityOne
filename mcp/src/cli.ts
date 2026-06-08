@@ -22,6 +22,7 @@ import {
 import { runServer } from "./server.js";
 import { TOOL_NAMES } from "./tools/index.js";
 
+// MCP server package version — one of four independent version axes; see docs/VERSIONING.md.
 const VERSION = "0.1.0";
 
 const HELP = `vo-mcp ${VERSION} — local-first stdio MCP server for Verity One
@@ -76,6 +77,15 @@ function hasFlag(argv: string[], name: string): boolean {
 }
 
 async function main(): Promise<void> {
+  // A CLI that writes to stdout must not crash when its consumer closes the
+  // pipe early — e.g. `vo-mcp install --client generic | head` or `| grep -q`.
+  // Without this, the next stdout.write throws an unhandled EPIPE and the
+  // process exits non-zero (which broke the release smoke's `… | grep -q`).
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+
   const argv = process.argv.slice(2);
   const cmd = argv[0];
 
