@@ -7,8 +7,8 @@ This is the four-step path a new tenant follows to go from zero to a fully synce
        └── working VO on your Mac (Postgres + API + tenant token)
   2. Ingest your stuff  — docs/INGEST-FOR-AGENTS.md
        └── your MD files + journals become VO nodes
-  3. Sync to VO+        — vo sync claim-token
-       └── deltas push to verityone.app every 60s
+  3. Sync to VO+        — manual dashboard pairing (VO+ manual beta)
+       └── pair via the dashboard, then deltas push to verityone.app
   4. Phone agent        — add https://verityone.app/mcp connector (no trailing slash)
        └── your mobile agent reads your VO from anywhere
 ```
