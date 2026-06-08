@@ -2,7 +2,7 @@
 name: verity-one-mcp
 description: Repo-local Skill-format brief for LLM agents (Claude, Codex, any MCP client) that will consume the VO MCP local stdio server. Loads the mental model — install shapes, session loop, tool / resource / prompt selection, write safety, citation, outcome semantics, proof reminders — without duplicating the full docs.
 when_to_use: About to call tools on a VO MCP server, about to read a vo:// resource, about to invoke a vo_ prompt, or about to record memory via vo_memory_write. Read the linked docs in full before changing MCP runtime behavior or the shipped surface.
-authority: docs/VO-MCP-AGENT-USAGE.md is the canonical agent-behavior guide; docs/VO-MCP-SERVER-CONTRACT.md is the binding per-rung contract; docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md is the evidence matrix. This Skill is a pointer + operational brief, not a replacement.
+authority: docs/VO-MCP-AGENT-USAGE.md is the canonical agent-behavior guide; docs/VO-MCP-SERVER-CONTRACT.md is the binding per-rung contract; VO-MCP-CROSS-CLIENT-INTEROP-PROOF is the evidence matrix. This Skill is a pointer + operational brief, not a replacement.
 repo_local: true
 ---
 
@@ -162,7 +162,7 @@ outcome labels, matching the interop proof matrix:
   surface is public queue-lifecycle write tooling (`vo_write_intent`
   and `vo_commands_cancel`; OAuth scope `vo.write.intent`); read-only
   queued-command status is `vo_commands_get`. Hosted-agent REST write
-  intent is separate queue-only HTTP. Valid `vop_REDACTED*` credentials may
+  intent is separate queue-only HTTP. Valid `vop_*` credentials may
   authenticate either surface, but both still queue intent rather than
   applying local mutations directly.
 - **`manual`** — operator-acceptance step that cannot be
@@ -196,6 +196,7 @@ mutate client config.
   (`agent-lab/proof/vo-mcp-interop/result.{json,md}`).
 - **`bun run agent-lab/scripts/run-hosted-proof.ts`** — produces
   the hosted portable-agent positive-read proof. Needs
+  the hosted master key + a reachable `VERITY_API_BASE`; runs
   only when the credentials are present.
 
 ## Where to read more
@@ -208,7 +209,7 @@ mutate client config.
   tree, handling semantics, per-client setup deltas).
 - **`docs/VO-MCP-SERVER-CONTRACT.md`** — binding per-rung contract.
   When the code and the contract disagree, the contract wins.
-- **`docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md`** — evidence matrix,
+- **`VO-MCP-CROSS-CLIENT-INTEROP-PROOF`** — evidence matrix,
   artifact contracts for hosted + client-acceptance proofs, the
   five outcome labels.
 - **`mcp/README.md`** — operator-facing package overview.
