@@ -279,8 +279,7 @@ automatically; this CLI path stays paste-only. The dashboard's
 parser-backed merge into a live Codex config. Paste the block into an
 existing `[mcp_servers.*]` section (or add the section) and restart
 Codex when using the CLI fallback. See
-`docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md` for the shape contract +
-matrix-level evidence.
+`docs/VO-MCP-SERVER-CONTRACT.md` for the shape contract.
 
 ## Install (any other MCP client)
 
@@ -331,8 +330,7 @@ Read-only validation of the on-disk client config. Answers:
 Never mutates the config file. A green client-doctor pass plus a
 green live-handshake doctor pass covers every precondition except GUI
 acceptance. Restarting the client and confirming the tools appear is
-the only manual step that remains — see
-`docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md` for the full matrix.
+the only manual step that remains.
 
 ## Manual run (debug only)
 
