@@ -152,14 +152,17 @@ Mapping written to /tmp/vo-ingest-2026-05-21-153400.json
 
 ---
 
-## After local ingestion — sync to VO+ (web)
+## After local ingestion — sync to VO+ (web), manual beta
 
-Once you have content in your local VO, opt into hosted sync:
+VO+ hosted sync is **optional and currently a manual beta**. Pairing the local
+node to a verityone.app account is **not yet wrapped by the `vo` CLI**: there is
+no `vo sync pair` command yet, and `vo sync claim-token` run *before* the node
+is paired fails with `node_not_found`. The pairing is done through the dashboard
+UI flow (it calls `/account/connect/redeem`). See `docs/CONNECT.md` step 3b for
+the minimum-viable manual pairing path.
 
-```bash
-vo sync claim-token            # browser flow links the local node to your verityone.app account
-# edit ~/.vo/config.json and set "hosted_sync": "outbound"
-# restart the API
-```
-
-The scheduler pushes a new delta every 60 seconds. Then on your phone agent app, add the exact `https://verityone.app/mcp` URL as a custom MCP connector, with no trailing slash — see `docs/CONNECT.md`.
+Once paired (manually), the outbound push is enabled by setting
+`"hosted_sync": "outbound"` in `~/.vo/config.json` and restarting the API; the
+scheduler then pushes a delta periodically. On a phone agent app, add the exact
+`https://verityone.app/mcp` URL as a custom MCP connector, with no trailing
+slash — see `docs/CONNECT.md`.

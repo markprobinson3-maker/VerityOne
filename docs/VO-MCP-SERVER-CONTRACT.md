@@ -1131,7 +1131,7 @@ and supersession.
           },
           "path": {
             "type": "string",
-            "description": "Relative path to a file in the project, e.g. \"docs/VO-CURRENT-STATE.md\"."
+            "description": "Relative path to a file in the project, e.g. \"notes/decisions.md\"."
           },
           "url":  {
             "type": "string",
@@ -1576,7 +1576,7 @@ responsibility. The vault-write surface is NOT in MCP in rung 3 or any
 currently-planned rung.
 
 Vault authority upstream of rung 3 is already defined in
-`docs/VO-VAULT-DESIGN-CONTRACT.md`. MCP rung 3 adapts it for agent
+`VO-VAULT-DESIGN-CONTRACT`. MCP rung 3 adapts it for agent
 consumption without changing any of it. When this document and the vault
 design contract disagree, the vault design contract wins for anything
 touching vault layout, frontmatter, or lifecycle stages.
@@ -1599,7 +1599,7 @@ Rationale (binding):
    category of operation — local filesystem, same user, same process
    privilege, strictly read-only.
 3. **Vault layout is stable and simple enough to embed safely.** Per
-   `docs/VO-VAULT-DESIGN-CONTRACT.md` §3, finalized dossiers live at
+   `VO-VAULT-DESIGN-CONTRACT` §3, finalized dossiers live at
    `<root>/dossiers/{hash8}-{slug}.dossier.md` and drafts at
    `<root>/dossiers/{hash8}-{slug}.dossier.draft.md`. Lookup is
    `ls dossiers/{hash8}-*` — deterministic, hash-anchored, no slug
@@ -3336,10 +3336,10 @@ the SDK returns before the handler runs.
 
 ## References
 
-- `docs/VO-MCP-LOCAL-FIRST-ARCHITECTURE.md` — architectural center and rules
-- `docs/VO-MCP-PR-LADDER.md` — rung ordering and acceptance bars
-- `docs/VO-MCP-R0-READINESS.md` — footprint baseline and hand-proof result
-- `docs/VO-CURRENT-STATE.md` — product posture
+- `VO-MCP-LOCAL-FIRST-ARCHITECTURE` — architectural center and rules
+- `VO-MCP-PR-LADDER` — rung ordering and acceptance bars
+- `VO-MCP-R0-READINESS` — footprint baseline and hand-proof result
+- `VO-CURRENT-STATE` — product posture
 - `api/src/routes/bootstrap.ts` — backend for `vo_bootstrap_project`
 - `api/src/routes/memory.ts` — backend for `vo_memory_recall`,
   `vo_memory_recall_routed`, `vo_memory_get`, `vo_memory_search`

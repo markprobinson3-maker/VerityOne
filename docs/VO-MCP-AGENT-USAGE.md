@@ -399,5 +399,5 @@ above.
 
 For the per-rung contract, see
 `docs/VO-MCP-SERVER-CONTRACT.md`. For the cross-client proof
-matrix, see `docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md`. For the
+matrix, see `VO-MCP-CROSS-CLIENT-INTEROP-PROOF`. For the
 package-level overview, see `mcp/README.md`.

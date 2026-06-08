@@ -130,8 +130,8 @@ Working = real node data comes back. Broken = "I don't have access" or an MCP er
 
 - Local bootstrap details + recovery: `scripts/bootstrap-local.sh` (read the header comment)
 - Ingestion playbook (paste into your agent): `docs/INGEST-FOR-AGENTS.md`
-- Web MCP architecture, OAuth scopes, write-intent guarantees: `docs/VO-PLUS-CLAUDE-CONNECTOR-FIRST-USE.md`, `docs/VO-MCP-HOSTED-REMOTE-WEB-FOLLOWUP.md`
-- Local stdio architecture, dashboard install controls, doctor flow: `docs/VO-MCP-ACTIVATION.md`, `docs/VO-MCP-LOCAL-FIRST-ARCHITECTURE.md`
+- Web MCP architecture, OAuth scopes, write-intent guarantees: `VO-PLUS-CLAUDE-CONNECTOR-FIRST-USE`, `VO-MCP-HOSTED-REMOTE-WEB-FOLLOWUP`
+- Local stdio architecture, dashboard install controls, doctor flow: `docs/VO-MCP-ACTIVATION.md`, `VO-MCP-LOCAL-FIRST-ARCHITECTURE`
 - Agent-facing usage brief (tool decision tree, citation rules): `docs/VO-MCP-AGENT-USAGE.md`
 
 ---
@@ -191,6 +191,6 @@ A working connection returns real node data. A broken one returns "I don't have 
 
 ## Pointers
 
-- Web MCP architecture, OAuth scopes, write-intent guarantees: `docs/VO-PLUS-CLAUDE-CONNECTOR-FIRST-USE.md`, `docs/VO-MCP-HOSTED-REMOTE-WEB-FOLLOWUP.md`
-- Local stdio architecture, dashboard install controls, doctor flow: `docs/VO-MCP-ACTIVATION.md`, `docs/VO-MCP-LOCAL-FIRST-ARCHITECTURE.md`
+- Web MCP architecture, OAuth scopes, write-intent guarantees: `VO-PLUS-CLAUDE-CONNECTOR-FIRST-USE`, `VO-MCP-HOSTED-REMOTE-WEB-FOLLOWUP`
+- Local stdio architecture, dashboard install controls, doctor flow: `docs/VO-MCP-ACTIVATION.md`, `VO-MCP-LOCAL-FIRST-ARCHITECTURE`
 - Agent-facing usage brief (tool decision tree, citation rules): `docs/VO-MCP-AGENT-USAGE.md`
