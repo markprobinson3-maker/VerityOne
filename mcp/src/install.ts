@@ -331,7 +331,22 @@ function installFilesystem(runtime: InstallRuntime, paths: InstallPaths): { self
   if (fs.existsSync(installedNodeModules)) {
     fs.rmSync(installedNodeModules, { recursive: true, force: true });
   }
-  fs.cpSync(paths.sourceNodeModules, installedNodeModules, { recursive: true, dereference: false });
+  // Copy node_modules DEREFERENCING every symlink to real files. The repo
+  // materializes the `@verity-one/vault-root` workspace dep (mcp/package.json
+  // `file:../packages/vault-root`) as symlinks that point BACK into the repo
+  // checkout; copying them as symlinks made the installed ~/.vo/mcp depend on
+  // the repo still existing — `node ~/.vo/mcp/dist/server.js` would break the
+  // moment the repo is deleted or moved, violating the self-contained install
+  // contract (docs/VO-MCP-SERVER-CONTRACT.md). We do NOT use
+  // `fs.cpSync(..., { dereference: true })` because Node ≤22's cpSync ignores
+  // that option for nested symlinks (verified: node v22 keeps the symlink) —
+  // so a manual dereferencing walk is the only portable fix.
+  copyTreeDereferenced(paths.sourceNodeModules, installedNodeModules);
+
+  // Guard the contract: nothing under the installed node_modules may remain a
+  // symlink that escapes the install root (which would re-introduce the
+  // repo-checkout dependency the dereferencing copy is meant to remove).
+  assertNoEscapingSymlinks(installedNodeModules, installRoot);
 
   // Minimal package.json for Node ESM resolution (.js files treated as ESM).
   const minimalPackageJson = {
@@ -353,6 +368,90 @@ function installFilesystem(runtime: InstallRuntime, paths: InstallPaths): { self
   writeLauncher(runtime);
 
   return { selfUpdate: false, pruned };
+}
+
+/**
+ * Recursively copy `src` → `dst`, DEREFERENCING every symlink into real files
+ * (Node ≤22's `fs.cpSync({dereference:true})` does not do this for nested
+ * symlinks). Broken symlinks are skipped; directory cycles are guarded. The
+ * result contains no symlinks, so the installed tree is self-contained.
+ */
+function copyTreeDereferenced(src: string, dst: string, seen: Set<string> = new Set()): void {
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(src);
+  } catch {
+    return;
+  }
+  if (st.isSymbolicLink()) {
+    let realSrc: string;
+    try {
+      realSrc = fs.realpathSync(src); // resolves the link; throws if broken
+      st = fs.statSync(realSrc);
+    } catch {
+      return; // dangling link → skip (never copy a broken/escaping link)
+    }
+    copyTreeDereferenced(realSrc, dst, seen);
+    return;
+  }
+  if (st.isDirectory()) {
+    const realDir = fs.realpathSync(src);
+    if (seen.has(realDir)) return; // symlink cycle guard
+    seen.add(realDir);
+    fs.mkdirSync(dst, { recursive: true });
+    for (const ent of fs.readdirSync(src)) {
+      copyTreeDereferenced(path.join(src, ent), path.join(dst, ent), seen);
+    }
+    seen.delete(realDir);
+    return;
+  }
+  if (st.isFile()) {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(src, dst);
+  }
+}
+
+/**
+ * Contract guard (docs/VO-MCP-SERVER-CONTRACT.md): the installed tree under
+ * `~/.vo/mcp` must be self-contained — no symlink may resolve to a path outside
+ * the install root. A workspace `file:` dep (e.g. `@verity-one/vault-root`) is
+ * materialized as repo-pointing symlinks; if those survive the copy the install
+ * silently depends on the repo checkout still existing. Walk the tree and fail
+ * the install loudly if any symlink escapes, so a regression in the copy mode
+ * can never ship a non-self-contained install.
+ */
+function assertNoEscapingSymlinks(dir: string, installRoot: string): void {
+  const root = fs.realpathSync(installRoot);
+  const stack: string[] = [dir];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(cur, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const ent of entries) {
+      const p = path.join(cur, ent.name);
+      if (ent.isSymbolicLink()) {
+        let resolved: string;
+        try {
+          resolved = fs.realpathSync(p);
+        } catch {
+          throw new Error(
+            `vo-mcp install: broken symlink in installed node_modules (${p}) — install is not self-contained`,
+          );
+        }
+        if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+          throw new Error(
+            `vo-mcp install: installed node_modules symlink escapes the install root (${p} -> ${resolved}); the install would break if the repo moves. The node_modules copy must dereference symlinks.`,
+          );
+        }
+      } else if (ent.isDirectory()) {
+        stack.push(p);
+      }
+    }
+  }
 }
 
 function buildEntry(runtime: InstallRuntime): { command: string; args: string[]; env: Record<string, string> } {
