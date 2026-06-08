@@ -24,8 +24,12 @@
 #     command to start it. Service management is your call.
 #   - Does not install LLM provider keys. Run `vo onboard` after this
 #     if you want LLM-assisted ingestion.
-#   - Does not configure VO+ hosted sync. Do that with `vo sync
-#     claim-token` once the local instance is healthy.
+#   - Does not configure VO+ hosted sync. Set that up later via the
+#     three-part handshake (sign in at verityone.app, pair THIS node via
+#     /my/sync, then enable sync) — see step 5 in the notes this script
+#     prints when it finishes. `vo sync claim-token` fails with
+#     `node_not_found` until the pairing step is done, so it is not the
+#     first command to run.
 #
 # Mac-only today (uses Homebrew + brew services).
 #
