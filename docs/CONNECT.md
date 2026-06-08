@@ -19,20 +19,36 @@ Pick up each step's doc below.
 
 ## Step 1 — local up
 
-One Mac, one command:
+One Mac, one command. The signed installer fetches the stable manifest, **verifies
+its Ed25519 signature**, then clones the pinned commit (from the manifest's
+`install.repo_url` + `source_ref`) and runs the local bootstrap:
 
 ```bash
-git clone https://github.com/markprobinson3-maker/VerityOne.git ~/VerityOne
-cd ~/VerityOne
-./scripts/bootstrap-local.sh
+curl -fsSL https://verityone.app/install.sh | bash
 ```
 
-The script is idempotent. It installs Postgres + pgvector + bun via Homebrew (only if missing), creates the `verity` database, runs all migrations, registers your tenant row, and writes `.env` + `~/.vo/config.json` with fresh tokens. It does **not** start the API — that's the last command it prints.
+It installs Postgres + pgvector + bun via Homebrew (only if missing), creates the
+`verity` database, runs all migrations, registers your tenant row, and writes `.env`
++ `~/.vo/config.json` with fresh tokens (default install dir `~/verity-one`). It is
+idempotent and does **not** start the API — that's the last command it prints.
+
+<details>
+<summary>Advanced: manual clone (skips signature verification — you vouch for the ref)</summary>
+
+The signed installer is preferred. The manual path below clones directly with **no
+manifest signature check**, so only use it if you are pinning a ref you trust yourself:
+
+```bash
+git clone https://github.com/markprobinson3-maker/VerityOne.git ~/verity-one
+cd ~/verity-one
+./scripts/bootstrap-local.sh
+```
+</details>
 
 After it finishes, start the API:
 
 ```bash
-cd ~/VerityOne
+cd ~/verity-one
 nohup bun run api/src/index.ts > /tmp/vo-api.log 2>&1 &
 curl -s http://localhost:3100/health    # should return {"ok":true,...}
 ```

@@ -105,15 +105,25 @@ After ingesting one directory, print a summary:
 
 ## Project ingestion — for repo-scale content
 
-For an entire repository (code + docs), use the built-in command instead of the per-file loop above:
+For an entire repository (code + docs) on a **source / OSS install**, drive the
+per-file loop from Steps 1–5 above over the repo: create one project node, then for
+each file `POST /memory/write` with the file's `source_path` + `source_ref` so every
+chunk keeps its receipts and project scope. The agent walking the tree *is* the bulk
+ingester — no extra tooling, and it uses only the public HTTP contract this node
+serves.
 
-```bash
-vo ingest --repo /path/to/repo --project-addr PJ.0.1.X
-```
-
-If you don't know the project_addr, omit it — `vo ingest` will scaffold a new one.
-
-`vo ingest` is a richer pipeline than `/remember`: it normalizes paths, detects code vs prose, batches embeddings, and writes through the canonical `/memory/write` contract. Use `/remember` only for journal-style content the bulk ingester doesn't fit.
+> **Operator CLI only.** The full operator CLI ships a `vo ingest` command that
+> wraps this loop (path normalization, code-vs-prose detection, batched embeddings),
+> but it lives in the private `agent-lab/` tree and is **not part of the OSS source
+> install** — OSS users use the HTTP loop above. For operators on a full/private
+> checkout:
+>
+> ```bash
+> vo ingest --repo /path/to/repo --project-addr PJ.0.1.X   # operator-only
+> ```
+>
+> Omit `--project-addr` and `vo ingest` scaffolds a new one. It writes through the
+> same canonical `/memory/write` contract as the loop above.
 
 ---
 

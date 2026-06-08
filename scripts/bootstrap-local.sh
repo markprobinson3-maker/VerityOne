@@ -129,15 +129,19 @@ ok "pgvector extension installed"
 # 8. JS deps
 step "Installing JS dependencies (bun install)"
 cd "$REPO_DIR"
-# Match the CI-tested path: public-install-smoke.yml + release-promote-stable.yml
-# both install with --frozen-lockfile, so the gated dependency tree is exactly the
-# committed lockfile, not whatever a plain install happens to resolve. Fall back to
-# a non-frozen install ONLY if the lockfile is genuinely out of sync (e.g. a private
-# full tree mid-change), mirroring release-vo-cli.yml — and surface it with a warning
-# instead of silently mutating the lockfile on every run.
+# Install the EXACT dependency tree CI gates: public-install-smoke.yml +
+# release-promote-stable.yml both use --frozen-lockfile, so a public/signed install
+# must too — otherwise a real install can silently resolve a dependency graph CI
+# would reject (batch-18 A3). Fail CLOSED by default; the non-frozen fallback is
+# OPT-IN via VO_ALLOW_NONFROZEN_INSTALL=1 (for a private full tree mid-change where
+# the lockfile legitimately lags), never automatic.
 if ! bun install --frozen-lockfile --silent; then
-  warn "frozen-lockfile install failed — retrying non-frozen (lockfile may be out of date for this tree)"
-  bun install --silent
+  if [ "${VO_ALLOW_NONFROZEN_INSTALL:-}" = "1" ]; then
+    warn "frozen-lockfile install failed — VO_ALLOW_NONFROZEN_INSTALL=1 set, retrying non-frozen (this MUTATES bun.lock; intended for a private full tree mid-change, not a public install)"
+    bun install --silent
+  else
+    err "frozen-lockfile install failed — the committed bun.lock does not match package.json. This is the exact tree CI gates, so a non-frozen install would diverge from what was tested. If you are on a private full tree mid-change, re-run with VO_ALLOW_NONFROZEN_INSTALL=1; otherwise this is a real lockfile drift to fix at the source."
+  fi
 fi
 ok "dependencies installed"
 

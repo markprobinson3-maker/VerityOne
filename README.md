@@ -71,6 +71,13 @@ with no config `profile` field yet — it is ignored once the config file
 carries a profile value. See `VO-RUNTIME-PROFILES` for the full
 contract.
 
+> **Operator CLI only.** The `vo init` / `vo profile` commands in this section are
+> part of the full operator CLI, which is **not part of the OSS source install**
+> (see the note under "Connect your agents" below — it lives in the private
+> `agent-lab/` tree). On a source install, switch profiles by editing
+> `~/.vo/config.json#profile` directly (the source of truth per the section above)
+> and restarting the api. The commands below are kept as the operator reference.
+
 **Switching an existing install** between profiles is one coherent
 operation via the `vo profile` command family:
 
