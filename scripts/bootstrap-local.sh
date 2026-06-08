@@ -48,8 +48,6 @@
 set -euo pipefail
 
 REPO_DIR="${VO_REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-TENANT_ID="${VO_TENANT_ID:-$(whoami)}"
-AGENT_ID="${VO_AGENT_ID:-${TENANT_ID}-agent}"
 DB_NAME="${VO_DB_NAME:-verity}"
 PG_PREFIX="${VO_PG_PREFIX:-/opt/homebrew/opt/postgresql@17/bin}"
 ENV_FILE="${VO_ENV_FILE:-$REPO_DIR/.env}"
@@ -59,6 +57,29 @@ step() { printf "\n==> %s\n" "$*"; }
 ok()   { printf "    ✓ %s\n" "$*"; }
 warn() { printf "    ! %s\n" "$*" >&2; }
 err()  { printf "\nERROR: %s\n" "$*" >&2; exit 1; }
+
+# Tenant id must satisfy api/src/lib/access.ts TENANT_ID_RE
+# (/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/): lowercase alnum + internal hyphens,
+# 1–64 chars. The default is $(whoami), but a Mac username can carry uppercase,
+# dots, underscores, or apostrophes — values psql will happily INSERT yet the API
+# then SILENTLY DROPS (parseAgentTenantMap requires the regex), leaving a
+# null-tenant auth context where every /remember and /memory/write 401/500s after
+# a "successful" bootstrap. An apostrophe would additionally break the
+# single-quoted SQL heredoc below. Normalize to a provably-valid id BEFORE any
+# DB/env/config write, and surface the normalized value so it matches what the
+# user must curl with.
+RAW_TENANT_ID="${VO_TENANT_ID:-$(whoami)}"
+TENANT_ID=$(printf '%s' "$RAW_TENANT_ID" \
+  | tr '[:upper:]' '[:lower:]' \
+  | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-\{1,\}//' -e 's/-\{1,\}$//' \
+  | cut -c1-64)
+# The 64-char cut can re-expose a trailing hyphen (TENANT_ID_RE forbids it).
+TENANT_ID=$(printf '%s' "$TENANT_ID" | sed -e 's/-\{1,\}$//')
+[ -n "$TENANT_ID" ] || err "could not derive a valid tenant id from '$RAW_TENANT_ID' — set VO_TENANT_ID to a value matching ^[a-z0-9][a-z0-9-]*[a-z0-9]\$ (lowercase letters, digits, hyphens)."
+if [ "$TENANT_ID" != "$RAW_TENANT_ID" ]; then
+  warn "tenant id normalized '$RAW_TENANT_ID' -> '$TENANT_ID' (the API only accepts lowercase alnum + hyphens). Use '$TENANT_ID' in your API calls."
+fi
+AGENT_ID="${VO_AGENT_ID:-${TENANT_ID}-agent}"
 
 # 1. macOS-only
 [ "$(uname -s)" = "Darwin" ] || err "bootstrap-local.sh supports macOS only today. (Linux + Windows pending.)"
@@ -108,7 +129,16 @@ ok "pgvector extension installed"
 # 8. JS deps
 step "Installing JS dependencies (bun install)"
 cd "$REPO_DIR"
-bun install --silent
+# Match the CI-tested path: public-install-smoke.yml + release-promote-stable.yml
+# both install with --frozen-lockfile, so the gated dependency tree is exactly the
+# committed lockfile, not whatever a plain install happens to resolve. Fall back to
+# a non-frozen install ONLY if the lockfile is genuinely out of sync (e.g. a private
+# full tree mid-change), mirroring release-vo-cli.yml — and surface it with a warning
+# instead of silently mutating the lockfile on every run.
+if ! bun install --frozen-lockfile --silent; then
+  warn "frozen-lockfile install failed — retrying non-frozen (lockfile may be out of date for this tree)"
+  bun install --silent
+fi
 ok "dependencies installed"
 
 # 9. Database schema.
@@ -225,33 +255,69 @@ EOF
   chmod 600 "$VO_CONFIG" 2>/dev/null || true
   ok "$VO_CONFIG written (mode 0600, carries agent_token + base_url for stdio MCP)"
 else
-  # Self-heal: an existing config.json from an older installer may LACK
-  # agent_token (→ MCP returns no_token) or base_url (→ MCP ignores a custom
-  # base). Inject only the missing keys without disturbing the rest, then re-lock.
+  # Self-heal: an existing config.json from an older installer may LACK agent_token
+  # (→ MCP returns no_token) or base_url (→ MCP ignores a custom base) — OR carry a
+  # STALE agent_token. The MCP server (mcp/src/config.ts) prefers config.json#agent_token
+  # over the VO_TOKEN env fallback, so when a rerun mints a fresh tenant token (the
+  # .env was deleted/regenerated above), a stale config token wins and every request
+  # 401s. RECONCILE agent_token to the authoritative value just written to .env
+  # ($TENANT_TOKEN), but only overwrite a bootstrap-generated (vo-beta-) stale token —
+  # never clobber a deliberately-set custom token; warn loudly in that case instead.
   # Uses bun (already installed above) for a safe JSON merge.
-  step "$VO_CONFIG exists — ensuring it carries agent_token + base_url"
-  if VO_HEAL_TOKEN="$TENANT_TOKEN" bun -e '
+  step "$VO_CONFIG exists — reconciling agent_token + base_url"
+  HEAL_STATUS=$(VO_HEAL_TOKEN="$TENANT_TOKEN" bun -e '
       const fs = require("fs"); const p = process.argv[1];
       let c; try { c = JSON.parse(fs.readFileSync(p, "utf8")); } catch { console.log("unparseable"); process.exit(1); }
       if (c === null || typeof c !== "object") { console.log("unparseable"); process.exit(1); }
-      let ch = false;
-      if (!c.agent_token && process.env.VO_HEAL_TOKEN) { c.agent_token = process.env.VO_HEAL_TOKEN; ch = true; }
+      let ch = false, conflict = false;
+      const want = process.env.VO_HEAL_TOKEN;
+      if (want) {
+        if (!c.agent_token) { c.agent_token = want; ch = true; }            // missing → fill
+        else if (c.agent_token !== want) {
+          if (String(c.agent_token).startsWith("vo-beta-")) { c.agent_token = want; ch = true; } // stale bootstrap token → refresh
+          else { conflict = true; }                                          // custom token → leave + warn
+        }
+      }
       const url = c.base_url || c.base || "http://localhost:3100";
       if (!c.base_url) { c.base_url = url; ch = true; }
       if (!c.base) { c.base = url; ch = true; }
       if (ch) fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
-      console.log(ch ? "healed" : "complete");
-    ' "$VO_CONFIG" >/dev/null 2>&1; then
-    chmod 600 "$VO_CONFIG" 2>/dev/null || true
-    ok "$VO_CONFIG checked (agent_token + base_url present, mode 0600)"
-  else
-    warn "could not parse/patch $VO_CONFIG — confirm it has \"agent_token\" and \"base_url\""
-  fi
+      console.log(conflict ? "conflict" : (ch ? "healed" : "complete"));
+    ' "$VO_CONFIG" 2>/dev/null) || HEAL_STATUS="error"
+  case "$HEAL_STATUS" in
+    healed|complete)
+      chmod 600 "$VO_CONFIG" 2>/dev/null || true
+      ok "$VO_CONFIG reconciled (agent_token matches .env, base_url present, mode 0600)"
+      ;;
+    conflict)
+      chmod 600 "$VO_CONFIG" 2>/dev/null || true
+      warn "$VO_CONFIG has a custom agent_token that does NOT match .env's VERITY_AGENT_TOKENS — leaving it untouched. If agents get 401s, delete $VO_CONFIG and $VO_DIR/agent-token, then re-run to adopt the current token."
+      ;;
+    *)
+      warn "could not parse/patch $VO_CONFIG — confirm it has \"agent_token\" (matching .env's VERITY_AGENT_TOKENS) and \"base_url\""
+      ;;
+  esac
 fi
-if [ ! -f "$VO_DIR/agent-token" ]; then
-  printf '%s' "$TENANT_TOKEN" > "$VO_DIR/agent-token"
-  chmod 600 "$VO_DIR/agent-token"
-  ok "$VO_DIR/agent-token written (mode 0600)"
+# The bare-token file mirrors config.json#agent_token and must track the same
+# authoritative .env token. Refresh a STALE bootstrap-generated (vo-beta-) token so
+# a rerun-with-fresh-.env does not leave curl/scripts sending an orphaned bearer;
+# never clobber a deliberately-set custom token (warn instead).
+VO_AGENT_TOKEN_FILE="$VO_DIR/agent-token"
+if [ ! -f "$VO_AGENT_TOKEN_FILE" ]; then
+  printf '%s' "$TENANT_TOKEN" > "$VO_AGENT_TOKEN_FILE"
+  chmod 600 "$VO_AGENT_TOKEN_FILE"
+  ok "$VO_AGENT_TOKEN_FILE written (mode 0600)"
+else
+  STORED_AGENT_TOKEN=$(cat "$VO_AGENT_TOKEN_FILE" 2>/dev/null || printf '')
+  if [ "$STORED_AGENT_TOKEN" = "$TENANT_TOKEN" ]; then
+    ok "$VO_AGENT_TOKEN_FILE already matches the current token (mode 0600)"
+  elif [ "${STORED_AGENT_TOKEN#vo-beta-}" != "$STORED_AGENT_TOKEN" ]; then
+    printf '%s' "$TENANT_TOKEN" > "$VO_AGENT_TOKEN_FILE"
+    chmod 600 "$VO_AGENT_TOKEN_FILE"
+    ok "$VO_AGENT_TOKEN_FILE refreshed to the current token (was a stale bootstrap token)"
+  else
+    warn "$VO_AGENT_TOKEN_FILE holds a custom token that does NOT match .env — leaving it. Delete it and re-run to adopt the current token if agents 401."
+  fi
 fi
 
 # 13. CLI shims at ~/.local/bin.
