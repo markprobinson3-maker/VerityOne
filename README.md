@@ -251,10 +251,11 @@ Two complementary CI tiers run on every PR + push to main.
   under `VERITY_LIVE_DRIFT_REQUIRED=1` instead of skipping),
   `federation-state-drift.test.ts`, `federation-ladder-drift.test.ts`,
   and `overlay-lifecycle.test.ts`.
-- Regenerates the foundation allowlist JSONLs (chuckone, localhost,
-  advisory-lock) into `/tmp/fnd-out` and `diff -u`s them against the
-  committed `docs/foundation/*allowlist.jsonl` so a PR that adds a
-  chuckone literal without updating the allowlist fails clearly.
+- Regenerates the foundation allowlist JSONLs (the operator tenant
+  allowlist, localhost, advisory-lock) into `/tmp/fnd-out` and
+  `diff -u`s them against the committed
+  `docs/foundation/*allowlist.jsonl` so a PR that adds an
+  operator-tenant literal without updating the allowlist fails clearly.
 - Triggers: PR + push to `main` + manual dispatch + 08:00 UTC nightly cron.
 
 F10 preserves the original F0 survey baseline and adds explicit
