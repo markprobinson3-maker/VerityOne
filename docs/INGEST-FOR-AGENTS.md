@@ -106,11 +106,25 @@ After ingesting one directory, print a summary:
 ## Project ingestion — for repo-scale content
 
 For an entire repository (code + docs) on a **source / OSS install**, drive the
-per-file loop from Steps 1–5 above over the repo: create one project node, then for
-each file `POST /memory/write` with the file's `source_path` + `source_ref` so every
-chunk keeps its receipts and project scope. The agent walking the tree *is* the bulk
-ingester — no extra tooling, and it uses only the public HTTP contract this node
-serves.
+per-file loop from Steps 1–5 above over the repo: create one project node, then
+`POST /memory/write` per file with the provenance in the canonical
+**`source_refs`** array (NOT a bare `source_path`/`source_ref` — the contract strips
+unknown fields, so those are silently dropped). Each entry is
+`{ "type": "...", "path": "..." }` (use `"url"` instead of `"path"` for web sources),
+and `project_addr` for scope:
+
+```json
+{
+  "kind": "context",
+  "assertion": "<what this file/chunk establishes>",
+  "source": "observed",
+  "project_addr": "PJ.0.1.X",
+  "source_refs": [{ "type": "doc", "path": "src/lib/foo.ts" }]
+}
+```
+
+The agent walking the tree *is* the bulk ingester — no extra tooling, only the
+public HTTP contract this node serves, and every chunk keeps queryable receipts.
 
 > **Operator CLI only.** The full operator CLI ships a `vo ingest` command that
 > wraps this loop (path normalization, code-vs-prose detection, batched embeddings),
