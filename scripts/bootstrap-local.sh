@@ -145,6 +145,23 @@ if ! bun install --frozen-lockfile --silent; then
 fi
 ok "dependencies installed"
 
+# 8b. Build vo-mcp — the headline public binary. mcp/ is deliberately NOT a
+#     root workspace (adding it would mutate bun.lock and trip the frozen
+#     install above), so its deps never arrive with the root install; without
+#     this step the vo-mcp symlink created later points at a launcher that can
+#     only print "run build". Self-contained: mcp/ has its own lockfile and
+#     vault-root is a file: dep into the tree installed above. A failure here
+#     must not kill an otherwise-good node install — warn with the manual
+#     command instead.
+if [ -f "$REPO_DIR/mcp/package.json" ]; then
+  step "Building vo-mcp (stdio MCP server)"
+  if (cd "$REPO_DIR/mcp" && bun install --frozen-lockfile --silent && bun run build); then
+    ok "vo-mcp built (mcp/dist)"
+  else
+    warn "vo-mcp build failed — the node still works; build it manually later: cd $REPO_DIR/mcp && bun install --frozen-lockfile && bun run build"
+  fi
+fi
+
 # 9. Database schema.
 #    Full source tree (private): the migration manifest is present → run the
 #    idempotent migration runner. Source/OSS distribution (public repo): the
@@ -333,9 +350,9 @@ VO_BIN_LINKED=""
 # install gets (the command the website shows: `vo-mcp install --client codex`).
 # mcp/bin/vo-mcp is a self-locating, symlink-safe launcher (it follows symlinks to
 # find its own package root, then runs dist/cli.js), so symlinking it into PATH is
-# safe and makes the advertised bare `vo-mcp ...` command resolve. It prints a
-# "run build" hint until mcp/ is built — that build is a separate documented step
-# (see /start), so the symlink is created now and starts working once mcp/ builds.
+# safe and makes the advertised bare `vo-mcp ...` command resolve. Step 8b above
+# builds mcp/ during bootstrap; if that build warned-and-skipped, the launcher
+# prints a "run build" hint until the manual build is done.
 if [ -f "$REPO_DIR/mcp/bin/vo-mcp" ]; then
   VO_MCP_LINK="$BIN_DIR/vo-mcp"
   if [ -e "$VO_MCP_LINK" ] && [ ! -L "$VO_MCP_LINK" ]; then
@@ -345,7 +362,7 @@ if [ -f "$REPO_DIR/mcp/bin/vo-mcp" ]; then
   else
     # Safe to (re)create: nothing there, or it is already a symlink we manage.
     ln -sf "$REPO_DIR/mcp/bin/vo-mcp" "$VO_MCP_LINK"
-    ok "vo-mcp launcher linked ($VO_MCP_LINK -> mcp/bin/vo-mcp; works after you build mcp/)"
+    ok "vo-mcp launcher linked ($VO_MCP_LINK -> mcp/bin/vo-mcp)"
     VO_BIN_LINKED="yes"
   fi
 fi

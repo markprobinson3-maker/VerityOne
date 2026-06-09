@@ -23,8 +23,8 @@
 # future addition; it is not live yet.)
 #
 # Usage:
-#   curl -fsSL https://verityone.app/install.sh | sh
-#   curl -fsSL https://verityone.app/install.sh | sh -s -- --help
+#   curl -fsSL https://verityone.app/install.sh | bash
+#   curl -fsSL https://verityone.app/install.sh | bash -s -- --help
 #
 # Environment overrides:
 #   VO_INSTALL_DIR    default: $HOME/verity-one
@@ -61,8 +61,8 @@ usage() {
 Verity One beta installer
 
 Usage:
-  curl -fsSL https://verityone.app/install.sh | sh
-  curl -fsSL https://verityone.app/install.sh | sh -s -- --help
+  curl -fsSL https://verityone.app/install.sh | bash
+  curl -fsSL https://verityone.app/install.sh | bash -s -- --help
 
 What it does:
   - Fetches the stable manifest + its detached Ed25519 signature and verifies
@@ -81,7 +81,7 @@ Environment overrides:
   VO_SKIP_BOOTSTRAP '1' = clone+checkout then stop (CI smoke; skips bootstrap)
 
 For the bleeding-edge tip of main:
-  VO_GIT_REF=main curl -fsSL https://verityone.app/install.sh | sh
+  VO_GIT_REF=main curl -fsSL https://verityone.app/install.sh | bash
 EOF
 }
 
@@ -135,6 +135,15 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
+# Platform guard — fail EARLY and honestly. bootstrap-local.sh is macOS-only
+# today (Homebrew-driven Postgres/bun install); without this check a Linux or
+# WSL user clones successfully and then dies deep inside bootstrap with an
+# unrelated-looking error. VO_FORCE_PLATFORM=1 skips the guard for people
+# intentionally doing a manual setup on another OS.
+if [ "$(uname -s)" != "Darwin" ] && [ "${VO_FORCE_PLATFORM:-}" != "1" ]; then
+  err "Verity One's automated installer supports macOS only today (Linux/Windows: manual setup — see https://verityone.app/start). Set VO_FORCE_PLATFORM=1 to continue anyway at your own risk."
+fi
+
 # Prereqs
 command -v git  >/dev/null 2>&1 || err "git is required first (try: brew install git)"
 command -v curl >/dev/null 2>&1 || err "curl is required"
@@ -154,7 +163,7 @@ else
   # picks). The signed manifest's repo_url is the AUTHORITATIVE clone target: a
   # repo move re-signs the manifest with the new repo_url, and real installs must
   # follow it instead of cloning the hardcoded fallback forever (otherwise a move
-  # keeps CI + manifest-integrity green while every `curl | sh` clones the old URL).
+  # keeps CI + manifest-integrity green while every `curl | bash` clones the old URL).
   TARGET_REF=$(tr -d '\n' < "$MTMP/manifest.json" \
     | sed -n 's/.*"install"[[:space:]]*:[[:space:]]*{[^}]*"source_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
   MANIFEST_REPO_URL=$(tr -d '\n' < "$MTMP/manifest.json" \
