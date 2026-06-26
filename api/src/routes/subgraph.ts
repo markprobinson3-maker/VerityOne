@@ -12,6 +12,12 @@ import { GLOBAL_SPACE_ID } from "../lib/spaces";
 
 const subgraph = new Hono();
 const POSTGRES_INT_MAX = 2_147_483_647;
+// Hard node ceiling per request (batch-31). With depthMax defaulting to 99 and
+// `layer` optional, `?pyramid=FUNCTION` selects the whole pyramid + every node's
+// substance JSON (FUNCTION ~970 visible nodes / ~1.5MB). Cap the node set so a
+// single authenticated caller can't repeatedly materialize a whole pyramid; the
+// edge queries are bounded by the (now-capped) node set transitively.
+const SUBGRAPH_NODE_CAP = 2000;
 
 function parseSubgraphInt(raw: string | undefined, fallback: number): number | null {
   if (raw === undefined) return fallback;
@@ -80,6 +86,7 @@ subgraph.get("/", async (c) => {
         AND n.depth <= ${depthMax}
         ${layerRaw !== undefined ? sql`AND n.layer = ${layer}` : sql``}
         ORDER BY n.depth, n.position
+        LIMIT ${SUBGRAPH_NODE_CAP}
       `
     : await sql`
         SELECT n.addr, n.pyramid_id, n.layer, n.depth, n.position,
@@ -99,6 +106,7 @@ subgraph.get("/", async (c) => {
           AND n.depth <= ${depthMax}
           ${layerRaw !== undefined ? sql`AND n.layer = ${layer}` : sql``}
         ORDER BY n.depth, n.position
+        LIMIT ${SUBGRAPH_NODE_CAP}
       `;
 
   // Get all edges between these nodes
@@ -182,6 +190,7 @@ subgraph.get("/", async (c) => {
     nodes,
     edges,
     count: { nodes: nodes.length, edges: edges.length },
+    ...(nodes.length >= SUBGRAPH_NODE_CAP ? { truncated: true } : {}),
   });
 });
 

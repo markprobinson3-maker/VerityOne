@@ -101,12 +101,12 @@ function retryHintFor(
   subReason?: VoUnavailableSubReason,
 ): string {
   if (kind === "stop_missing_key") {
-    return "Run <code>vo onboard</code> first, then retry.";
+    return "Set an AI provider key (e.g. <code>GOOGLE_API_KEY</code>) in your environment or <code>~/.vo/secrets.env</code>, then retry.";
   }
   if (kind === "stop_vo_unavailable") {
     switch (subReason) {
       case "missing_tenant_auth":
-        return "Run <code>vo init --tenant &lt;id&gt;</code> on this machine, then retry.";
+        return "Ensure <code>~/.vo/config.json</code> carries <code>agent_token</code> + <code>tenant_id</code> (the installer writes these), then retry.";
       case "all_writes_failed":
         return "Check local VO health (every atom failed to land), then retry.";
       case "unreachable":
@@ -252,7 +252,7 @@ function renderMissingKey(o: Extract<AutoOutcome, { kind: "stop_missing_key" }>)
   </div>
   <div class="summary-row">
     <span class="summary-label">Next</span>
-    <span class="summary-value">Run <code>vo onboard</code> on this machine (local setup, not hosted).</span>
+    <span class="summary-value">Set an AI provider key (e.g. <code>GOOGLE_API_KEY</code>) in <code>~/.vo/secrets.env</code> or your environment (local setup, not hosted), then retry.</span>
   </div>
   ${renderRetryControl("stop_missing_key")}
 </div>`;
@@ -291,10 +291,9 @@ function renderVoUnavailable(o: Extract<AutoOutcome, { kind: "stop_vo_unavailabl
     whatSucceeded = "capture, atomize, curate, draft dossier";
     whatDidNot = "graph write, finalize, log/index update";
     const rootArg = esc(shellQuote(o.root));
-    const hashArg = esc(String(o.hash8 || ""));
     nextStep = o.subReason === "missing_tenant_auth"
-      ? `Run <code>vo init --tenant &lt;id&gt;</code>, then <code>vo vault confirm --root ${rootArg} ${hashArg}</code>.`
-      : `Run <code>vo vault confirm --root ${rootArg} ${hashArg}</code> when local VO is back.`;
+      ? `Ensure <code>~/.vo/config.json</code> carries <code>agent_token</code> + <code>tenant_id</code> (the installer writes these), then re-run the harvest — the draft dossier under <code>${rootArg}</code> is reused.`
+      : `Re-run the harvest when local VO is back — the draft dossier under <code>${rootArg}</code> is reused.`;
   } else {
     whatSucceeded = "capture only";
     whatDidNot = "atomize, draft, graph write, finalize";

@@ -10,22 +10,21 @@
 import { Hono } from "hono";
 import { errorJson } from "../lib/error-envelope";
 import { sql } from "../db";
-import { allowedRegistryAccessLevels, assertAgentSelfOrOperator, getAccessContext, visibleSpaceIds } from "../lib/access";
+import { allowedRegistryAccessLevels, assertAgentSelfOrOperator, getAccessContext, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
 import { embedQuery, toVectorStr } from "../lib/embed";
 import { auditMutation } from "../lib/audit";
 import { GLOBAL_SPACE_ID, tenantSpaceId } from "../lib/spaces";
 
 const regrounding = new Hono();
 
-function regroundingAuditTenant(c: any, agentId: string): string {
-  const access = getAccessContext(c);
-  if (access.tenantId) return access.tenantId;
-  const mapped = (process.env.VERITY_AGENT_TENANTS || "")
-    .split(",")
-    .map((p) => p.trim().split(":"))
-    .find(([aid]) => aid === agentId)?.[1];
-  return mapped || process.env.VERITY_DEFAULT_TENANT_ID || "system";
-}
+// Attribution uses the canonical resolveAgentTenant (batch-31): the prior local
+// copy fell back to VERITY_DEFAULT_TENANT_ID, so an operator hitting
+// /regrounding?agent_id=<foreign-unmapped-agent> stamped the audit + drift
+// stimulus under the operator's REAL default tenant (surfacing a foreign agent's
+// activity in that tenant's audit export). resolveAgentTenant falls back
+// access.tenantId → agentTenants map → "system" (NO default-tenant), matching the
+// sibling watch/signal/agent routes; "system" maps to GLOBAL_SPACE_ID below and
+// is never surfaced by audit-export's WHERE tenant_id = <session tenant> filter.
 
 regrounding.get("/", async (c) => {
   const agentId = c.req.query("agent_id") || c.req.query("agent") || "";
@@ -203,7 +202,7 @@ regrounding.get("/", async (c) => {
   // 4. Log drift event for telemetry. F11: capture correlation_id before
   // entering the async closure so the request id makes it into the stimulus.
   const regroundingCorrelationId = ((c as any).get("correlation_id") as string | undefined) || null;
-  const regroundingTenant = regroundingAuditTenant(c, agentId);
+  const regroundingTenant = resolveAgentTenant(c, agentId);
   const regroundingSpaceId = regroundingTenant && regroundingTenant !== "system"
     ? tenantSpaceId(regroundingTenant)
     : GLOBAL_SPACE_ID;
@@ -223,7 +222,7 @@ regrounding.get("/", async (c) => {
 
   await auditMutation(c, sql, {
     kind: "admin_action",
-    tenantId: regroundingAuditTenant(c, agentId),
+    tenantId: resolveAgentTenant(c, agentId),
     actor: agentId,
     operation: "regrounding",
     eventData: { session_id: sessionId, drift_score: parseFloat(driftScore.toFixed(3)), recommendation },

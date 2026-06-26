@@ -10,6 +10,7 @@
  */
 
 import { Hono } from "hono";
+import { randomUUID } from "node:crypto";
 import { sql } from "../db";
 import { assertAgentSelfOrOperator, getAccessContext, isOperator, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
 import { errorJson } from "../lib/error-envelope";
@@ -52,16 +53,26 @@ const HALFLIFE_MAP: Record<AgentSignalType, number> = { query: 4, success: 48, f
 
 
 signal.post("/agent", async (c) => {
-  const body = await validateRequest(c, AgentSignalSchema);
+  // maxBytes is a defense-in-depth cap so a huge body is rejected before parse/validation;
+  // the schema's nodes.max(100)/context.max(2000) bound the per-field work that follows.
+  const body = await validateRequest(c, AgentSignalSchema, "json", { maxBytes: 65536 });
   const type = body.type as AgentSignalType;
   if (body.agent && !assertAgentSelfOrOperator(c, body.agent)) {
     return errorJson(c, "forbidden");
   }
 
-  // Rate limit: max 10 agent signals per minute
+  // Rate limit: max 10 agent signals per minute, PER TENANT space.
+  // The counter MUST be scoped to the same space_id the INSERT below
+  // writes to. An unscoped (global) COUNT lets one tenant's signal
+  // volume starve every other tenant's /signal/agent endpoint
+  // (cross-tenant denial), since 10 agent signals from any single
+  // tenant within 60s would rate-limit every other tenant.
+  const access = getAccessContext(c);
+  const spaceId = access.tenantId ? tenantSpaceId(access.tenantId) : GLOBAL_SPACE_ID;
   const [recent] = await sql`
     SELECT COUNT(*)::int as n FROM stimuli
-    WHERE source = 'agent' AND created_at > now() - interval '60 seconds'`;
+    WHERE source = 'agent' AND space_id = ${spaceId}
+      AND created_at > now() - interval '60 seconds'`;
   if (recent.n >= 10) {
     return errorJson(c, "rate_limited");
   }
@@ -73,12 +84,17 @@ signal.post("/agent", async (c) => {
     content = content.slice(0, 500);
   }
 
-  const sourceId = "signal_" + Math.floor(Date.now() / 1000);
   // F11: thread the request's correlation_id into the stimulus row so the
   // F9 audit chain reaches into the lifecycle layer.
   const correlationId = getCorrelationId(c);
-  const access = getAccessContext(c);
-  const spaceId = access.tenantId ? tenantSpaceId(access.tenantId) : GLOBAL_SPACE_ID;
+  // Per-request unique source_id. The old `signal_<epoch-seconds>` key collided on the
+  // stimuli UNIQUE(source, source_id) for ANY two agent signals in the same wall-clock
+  // second (across tenants/callers); the loser hit ON CONFLICT DO NOTHING → 0 rows →
+  // 409 "duplicate signal" and was silently lost. Namespace by tenant + a random suffix
+  // so distinct concurrent signals never collide. (The ON CONFLICT below is kept as a
+  // belt-and-braces guard against an astronomically-unlikely collision.)
+  // `access`/`spaceId` are hoisted above (the per-tenant rate-limit COUNT).
+  const sourceId = `signal_${access.tenantId ?? "global"}_${Date.now()}_${randomUUID().slice(0, 8)}`;
   const result = await sql`
     INSERT INTO stimuli (source, source_id, stimulus_type, urgency, content, decay_halflife_hours, peak_delay_hours, processed, correlation_id, space_id)
     VALUES ('agent', ${sourceId}, ${TYPE_MAP[type]}, ${URGENCY_MAP[type]}, ${content}, ${HALFLIFE_MAP[type]}, 0, false, ${correlationId}, ${spaceId})

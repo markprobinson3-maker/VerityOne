@@ -350,15 +350,23 @@ temporal.post("/correct", async (c) => {
   }
 
   const body = await c.req.json().catch(() => null);
-  if (!body || !body.day || !body.issue) {
+  // Validate TYPE before any string op (batch-25 #4): a truthy non-string
+  // (e.g. { issue: 42 }) reached body.issue.slice(...) and 500'd. Require
+  // string day + issue, NUL-check, then normalize/truncate after validation.
+  if (!body || typeof body.day !== "string" || !body.day.trim() || typeof body.issue !== "string" || !body.issue.trim()) {
     return errorJson(c, "invalid_request", { message: "Missing required fields: day, issue" });
   }
+  if (hasNullByte(body.day) || hasNullByte(body.issue)) {
+    return errorJson(c, "invalid_request", { message: "Fields day and issue must not contain null bytes" });
+  }
+  const day = body.day.normalize("NFC").trim();
+  const issue = truncateCodePoints(body.issue.normalize("NFC").trim(), 4000);
 
   const spaceId = `tenant:${access.tenantId}`;
 
   const [entry] = await sql`
     INSERT INTO temporal_intake (target_day, content, status, space_id)
-    VALUES (${body.day}, ${body.issue.slice(0, 4000)}, 'correction', ${spaceId})
+    VALUES (${day}, ${issue}, 'correction', ${spaceId})
     RETURNING id`;
 
   await auditMutation(c, sql, {
@@ -366,7 +374,7 @@ temporal.post("/correct", async (c) => {
     tenantId: access.tenantId,
     actor: access.agentId || "operator",
     operation: "temporal_correction_queue",
-    eventData: { day: body.day, entry_id: entry.id },
+    eventData: { day, entry_id: entry.id },
   });
 
   return c.json({ ok: true, queued: true, entry_id: entry.id });

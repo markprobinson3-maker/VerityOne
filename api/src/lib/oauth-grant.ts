@@ -349,6 +349,12 @@ export interface CodeExchangeInput {
   redirect_uri: string;
   resource: string;
   code_verifier: string;
+  /**
+   * Whether the registered client may receive a refresh token (B29-1). The
+   * route passes client.grant_types.includes("refresh_token"). Defaults to
+   * true for backward-compat when omitted (internal/test callers).
+   */
+  allow_refresh?: boolean;
 }
 
 export type CodeExchangeError =
@@ -360,10 +366,11 @@ export type CodeExchangeError =
 export interface CodeExchangeResult {
   grant_id: string;
   access_token: string;
-  refresh_token: string;
+  /** null when the client is not authorized for the refresh_token grant (B29-1). */
+  refresh_token: string | null;
   access_expires_at: Date;
-  refresh_expires_at: Date;
-  refresh_inactivity_at: Date;
+  refresh_expires_at: Date | null;
+  refresh_inactivity_at: Date | null;
   family_id: string;
   account_id: string;
   tenant_id: string;
@@ -394,6 +401,10 @@ export async function exchangeAuthCode(
   // Single-use enforcement: lock the code row before marking it consumed.
   return await sql.begin(async (tx) => {
     const q = tx as any;
+    // Bound the FOR UPDATE wait (batch-27 B2): an interactive token endpoint must
+    // not pin a pooled connection waiting on a contended grant row. SET LOCAL is
+    // tx-scoped (auto-resets on commit/rollback). 3s → fail fast on contention.
+    await q`SET LOCAL lock_timeout = '3s'`;
     const [code] = await q`
       SELECT id, client_id, account_id::text AS account_id, tenant_id, agent_id,
              hosted_agent_credential_id::text AS hosted_agent_credential_id,
@@ -437,11 +448,17 @@ export async function exchangeAuthCode(
     // Issue the fresh access + refresh row in the same family.
     const new_id = crypto.randomUUID();
     const access_token = mintAccessToken();
-    const refresh_token = mintRefreshToken();
+    // B29-1: only mint a refresh token if the client registered the
+    // refresh_token grant type. A code-only client (RFC 6749 §5.2
+    // unauthorized_client) gets an access token with NO refresh — closing the
+    // over-issuance of long-lived capability against the client's own declared
+    // posture. Existing clients that registered refresh_token are unaffected.
+    const allowRefresh = input.allow_refresh !== false;
+    const refresh_token = allowRefresh ? mintRefreshToken() : null;
     const now = Date.now();
     const access_expires_at = new Date(now + ACCESS_TOKEN_TTL_MS);
-    const refresh_expires_at = new Date(now + REFRESH_TOKEN_ABSOLUTE_TTL_MS);
-    const refresh_inactivity_at = new Date(now + REFRESH_TOKEN_INACTIVITY_TTL_MS);
+    const refresh_expires_at = allowRefresh ? new Date(now + REFRESH_TOKEN_ABSOLUTE_TTL_MS) : null;
+    const refresh_inactivity_at = allowRefresh ? new Date(now + REFRESH_TOKEN_INACTIVITY_TTL_MS) : null;
 
     await q`
       INSERT INTO oauth_grants (
@@ -454,11 +471,11 @@ export async function exchangeAuthCode(
       )
       VALUES (
         ${new_id}::uuid, ${code.client_id as string},
-        ${hashToken(access_token)}, ${hashToken(refresh_token)},
+        ${hashToken(access_token)}, ${refresh_token ? hashToken(refresh_token) : null},
         ${code.account_id as string}::uuid, ${code.tenant_id as string}, ${code.agent_id as string},
         ${code.hosted_agent_credential_id as string}::uuid,
         ${code.scopes as unknown as string[]}, ${code.audience as string},
-        ${access_expires_at.toISOString()}, ${refresh_expires_at.toISOString()}, ${refresh_inactivity_at.toISOString()},
+        ${access_expires_at.toISOString()}, ${refresh_expires_at ? refresh_expires_at.toISOString() : null}, ${refresh_inactivity_at ? refresh_inactivity_at.toISOString() : null},
         'active', ${code.grant_family_id as string}::uuid, ${code.id as string}::uuid
       )
     `;
@@ -510,17 +527,40 @@ export async function rotateRefreshToken(
   const refresh_hash = hashToken(input.raw_refresh_token);
   return await sql.begin(async (tx) => {
     const q = tx as any;
+    // Bound the FOR UPDATE wait (batch-27 B2) — same rationale as exchangeAuthCode:
+    // fail fast on a contended grant row instead of pinning a pooled connection.
+    await q`SET LOCAL lock_timeout = '3s'`;
     // Look up by hash. Includes consumed/revoked rows so stale
     // historical refresh grants cleanly return invalid_grant.
+    // batch-32 VO-TOK-1: join the credential/account/tenant-link lifecycle so a
+    // refresh can't keep minting access tokens for a suspended account, a revoked
+    // credential, or a severed tenant link — mirroring resolveConnectorAccessTokenForResource
+    // (oauth-resource-resolver.ts) so refresh and resolution share one lifecycle truth.
+    // FOR UPDATE OF g: lock only the grants row (FOR UPDATE can't apply to the
+    // nullable side of the LEFT JOIN; the rotation only mutates oauth_grants).
     const [row] = await q`
-      SELECT id, client_id, account_id::text AS account_id, tenant_id, agent_id,
-             hosted_agent_credential_id::text AS hosted_agent_credential_id,
-             scopes, audience, status, refresh_expires_at,
-             refresh_inactivity_at,
-             grant_family_id::text AS grant_family_id
-      FROM oauth_grants
-      WHERE refresh_token_hash = ${refresh_hash}
-      FOR UPDATE
+      SELECT g.id, g.client_id, g.account_id::text AS account_id, g.tenant_id, g.agent_id,
+             g.hosted_agent_credential_id::text AS hosted_agent_credential_id,
+             g.scopes, g.audience, g.status, g.refresh_expires_at,
+             g.refresh_inactivity_at,
+             g.grant_family_id::text AS grant_family_id,
+             c.status AS credential_status,
+             a.status AS account_status,
+             atl.status AS link_status
+      FROM oauth_grants g
+      JOIN hosted_agent_credentials c
+        ON c.credential_id = g.hosted_agent_credential_id
+       AND c.account_id    = g.account_id
+       AND c.tenant_id     = g.tenant_id
+       AND c.agent_id      = g.agent_id
+      JOIN accounts a
+        ON a.account_id    = g.account_id
+      LEFT JOIN account_tenant_links atl
+        ON atl.account_id  = g.account_id
+       AND atl.tenant_id   = g.tenant_id
+       AND atl.status      = 'active'
+      WHERE g.refresh_token_hash = ${refresh_hash}
+      FOR UPDATE OF g
     `;
     if (!row) {
       return { error: { kind: "invalid_grant", message: "Refresh token not found." } };
@@ -544,6 +584,16 @@ export async function rotateRefreshToken(
     const inactivityExpiry = row.refresh_inactivity_at as Date | null;
     if (inactivityExpiry && inactivityExpiry.getTime() <= Date.now()) {
       return { error: { kind: "invalid_grant", message: "Refresh token expired (inactivity TTL)." } };
+    }
+    // batch-32 VO-TOK-1: lifecycle gates (parity with the access-token resolver).
+    if (row.credential_status !== "active") {
+      return { error: { kind: "invalid_grant", message: "Agent credential is no longer active." } };
+    }
+    if (row.account_status !== "active") {
+      return { error: { kind: "invalid_grant", message: "Account is no longer active." } };
+    }
+    if (row.link_status !== "active") {
+      return { error: { kind: "invalid_grant", message: "Tenant link is no longer active." } };
     }
 
     // Issue a fresh access token while keeping the refresh token
@@ -607,6 +657,14 @@ export interface FamilyRevokeHooks {
    * the revoke. If it throws, the revoke rolls back with it.
    */
   auditInside?: (tx: SqlOrTx, result: FamilyRevokeResult) => Promise<void>;
+  /**
+   * RFC 7009 §2.1 client binding for revokeByPresentedToken. When set (even to
+   * "" or null), the presented token's grant family is only revoked if its
+   * client_id equals this value; a mismatch is a silent no-op (§2.2 — respond
+   * 200, leak no existence info). Leave undefined to skip the check for
+   * separately-authenticated callers.
+   */
+  expectedClientId?: string | null;
 }
 
 /**
@@ -623,7 +681,7 @@ export async function revokeByPresentedToken(
 ): Promise<FamilyRevokeResult> {
   const h = hashToken(raw_token);
   const [grant] = await sql`
-    SELECT grant_family_id::text AS grant_family_id
+    SELECT grant_family_id::text AS grant_family_id, client_id
     FROM oauth_grants
     WHERE access_token_hash = ${h}
        OR refresh_token_hash = ${h}
@@ -633,6 +691,13 @@ export async function revokeByPresentedToken(
   // Token not found: nothing to revoke and nothing to audit (auditInside is
   // not invoked), matching RFC 7009 §2.2 (respond 200, leak no existence info).
   if (!grant) {
+    return { family_id: null, revoked_count: 0, client_id: null, agent_id: null, audience: null, scopes: null };
+  }
+  // RFC 7009 §2.1: a (public) client may only revoke a token issued to ITSELF.
+  // When the caller binds an expected client_id, a mismatch is a silent no-op so
+  // a party holding another client's token string cannot revoke that client's
+  // grant family (§2.2: still respond 200, leak no existence info).
+  if (hooks.expectedClientId !== undefined && grant.client_id !== hooks.expectedClientId) {
     return { family_id: null, revoked_count: 0, client_id: null, agent_id: null, audience: null, scopes: null };
   }
   return revokeFamily(sql, grant.grant_family_id as string, reason, hooks);

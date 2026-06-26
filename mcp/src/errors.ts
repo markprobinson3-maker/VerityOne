@@ -27,7 +27,7 @@ export interface VoErrorEnvelope {
 }
 
 const HINTS: Record<ErrorClass, string> = {
-  local_vo_unreachable: "run: vo doctor; ensure the local VO node is running",
+  local_vo_unreachable: "run: vo-mcp doctor; ensure the local VO node is running (public source install: cd ~/verity-one && bun run dev:api)",
   tenant_auth_failure: "check ~/.vo/config.json has a valid agent_token for this tenant",
   not_found: "verify the requested address or key exists in the selected tenant",
   validation_failure: "inspect the `detail` field for the specific validation error",

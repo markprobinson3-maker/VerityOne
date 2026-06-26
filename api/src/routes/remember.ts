@@ -18,7 +18,8 @@ import {
 } from "../lib/memory-contract";
 import { allocateChildSlotInTx } from "../lib/ontology";
 import { tryJournalMemoryInTx } from "../lib/sync-journal-port";
-import { errorJson } from "../lib/error-envelope";
+import { errorJson, ApiError } from "../lib/error-envelope";
+import { classifyEmbedUnavailable } from "../lib/embed-availability";
 import { validateRequest } from "../lib/zod-helpers";
 import { RememberRequestSchema } from "../schemas/remember.schema";
 import { auditMutation } from "../lib/audit";
@@ -51,6 +52,7 @@ remember.post("/", async (c) => {
 
   const body = await validateRequest(c, RememberRequestSchema, "json", {
     requireJsonContentType: true,
+    maxBytes: 50_000,
   });
 
   // Adapt old payload to canonical contract
@@ -94,11 +96,21 @@ remember.post("/", async (c) => {
   // query-task vector for the duplicate-search comparison;
   // embedTextForInsert on the canonical node text produces the
   // document-task vector that becomes embedding_hv.
-  const queryVec = await embedQuery(canonicalReq.assertion);
+  let queryVec: number[];
+  let storedEmbed: Awaited<ReturnType<typeof embedTextForInsert>>;
+  try {
+    queryVec = await embedQuery(canonicalReq.assertion);
+    storedEmbed = await embedTextForInsert(
+      embeddingTextForNode(label, substance),
+    );
+  } catch (err) {
+    // First-run honesty: a missing/invalid embedding key must say so (and
+    // how to fix it), not surface as a bare internal_error.
+    const embedDown = classifyEmbedUnavailable(err);
+    if (embedDown) throw new ApiError("embedding_service_unavailable", embedDown.message, undefined, embedDown.hint);
+    throw err;
+  }
   const queryVecStr = toVectorStr(queryVec);
-  const storedEmbed = await embedTextForInsert(
-    embeddingTextForNode(label, substance),
-  );
 
   // Dedup uses the query-task vector against existing document-task
   // vectors (Gemini's task-aware embeddings align query↔document for
@@ -132,8 +144,31 @@ remember.post("/", async (c) => {
   }
 
   // Atomic insert
-  const [result] = await sql.begin(async (tx: any) => {
+  const [result] = (await sql.begin(async (tx: any) => {
     await tx`SELECT pg_advisory_xact_lock(${REMEMBER_LOCK_ID})`;
+
+    // dedup-lock: the pre-lock dedup above is an optimistic fast path. Two
+    // concurrent identical /remember writes can BOTH pass it before either
+    // inserts, then serialize on this advisory lock and both insert — a
+    // double-write. Re-run the dedup check here, INSIDE the lock, where a prior
+    // writer's committed insert is visible (READ COMMITTED + the lock means the
+    // earlier writer has already committed and released before we acquire it).
+    // If a duplicate now exists, collapse this write instead of inserting.
+    const [lockedDup] = await tx`
+      SELECT addr, label, 1 - (embedding_hv <=> ${queryVecStr}::halfvec) as similarity
+      FROM nodes
+      WHERE space_id = ${spaceId} AND node_type = 'memory'
+        AND embedding_hv IS NOT NULL
+        AND dormant_at IS NULL
+        AND visibility <> 'deleted'
+        AND COALESCE(substance->>'project_addr', '') = ''
+      ORDER BY embedding_hv <=> ${queryVecStr}::halfvec
+      LIMIT 1
+    `;
+    if (lockedDup && parseFloat(lockedDup.similarity) > 0.85) {
+      return [{ deduplicated: true, dup: lockedDup }];
+    }
+
     const slot = await allocateChildSlotInTx(tx, "PROJECTS", null, { defaultDepth: 3 });
     await tx`
       INSERT INTO nodes (
@@ -189,7 +224,21 @@ remember.post("/", async (c) => {
     );
 
     return [{ addr: slot.addr }];
-  });
+  })) as any[];
+
+  // dedup-lock: a concurrent identical write won the race and committed first;
+  // collapse this one (same response shape as the pre-lock dedup fast path).
+  if (result && (result as any).deduplicated) {
+    const d = (result as any).dup;
+    return c.json({
+      ok: true,
+      deduplicated: true,
+      existing_addr: d.addr,
+      existing_label: d.label,
+      similarity: parseFloat(parseFloat(d.similarity).toFixed(3)),
+      message: "Skipped — semantically similar memory already exists",
+    });
+  }
 
   // Rung 3: best-effort local dossier write. On a long-lived/local instance
   // with a ready vault, also persist a verifiable on-disk source artifact

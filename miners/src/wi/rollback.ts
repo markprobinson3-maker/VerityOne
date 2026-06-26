@@ -7,7 +7,7 @@ import { sql, normalizeUrl } from "./config";
 import { existsSync, mkdirSync, renameSync } from "fs";
 import { join, dirname } from "path";
 
-const SKILLS_DIR = join(process.env.HOME || "", ".config/verity/skills");
+const SKILLS_DIR = join(process.env.HOME || "", ".openclaw/workspace-main/skills");
 const ROLLED_BACK_DIR = join(SKILLS_DIR, "_rolled_back");
 
 interface RollbackResult {
@@ -43,7 +43,7 @@ export async function rollbackRun(runId: string): Promise<RollbackResult> {
   if (run.status === "rolled_back") throw new Error(`Run already rolled back: ${runId}`);
 
   // Single transaction for all deletes
-  await sql.begin(async (tx) => {
+  await sql.begin(async (tx: any) => {
     // 1. DELETE staging_nodes
     const stagingResult = await tx`
       DELETE FROM staging_nodes
@@ -58,11 +58,14 @@ export async function rollbackRun(runId: string): Promise<RollbackResult> {
     `;
     result.stimuliDeleted = stimuliResult.count;
 
-    // 3. Handle skill proposals — check for installed skills first
+    // 3. Handle skill proposals — check for installed skills first.
+    // Scope by run_id (exact) so rolling back an OLDER run cannot delete skill
+    // proposals created by a NEWER run of the same source_url. (The previous
+    // `source_url + created_at >=` predicate deleted every later run's
+    // proposals for that URL — data-loss.)
     const skills = await tx`
       SELECT id, skill_path, status FROM wi_skill_proposals
-      WHERE source_url = ${run.source_url}
-        AND created_at >= (SELECT created_at FROM wi_runs WHERE run_id = ${runId})
+      WHERE run_id = ${runId}
     `;
 
     for (const skill of skills) {
@@ -85,8 +88,7 @@ export async function rollbackRun(runId: string): Promise<RollbackResult> {
 
     const skillResult = await tx`
       DELETE FROM wi_skill_proposals
-      WHERE source_url = ${run.source_url}
-        AND created_at >= (SELECT created_at FROM wi_runs WHERE run_id = ${runId})
+      WHERE run_id = ${runId}
     `;
     result.skillProposalsDeleted = skillResult.count;
 

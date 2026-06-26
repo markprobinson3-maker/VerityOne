@@ -478,6 +478,18 @@ function mergeClaudeDesktop(runtime: InstallRuntime, force: boolean): string {
     }
   }
 
+  // Reject a malformed mcpServers (array or non-object) rather than silently
+  // coercing it: an array passes `typeof === "object"`, then `mcpServers["verity-one"]=...`
+  // sets a non-index property that JSON.stringify drops — the entry vanishes and
+  // install still reports success. Mirror the read-side guard in
+  // client-config-check.ts. (batch-31)
+  if (existing.mcpServers !== undefined && existing.mcpServers !== null) {
+    if (typeof existing.mcpServers !== "object" || Array.isArray(existing.mcpServers)) {
+      throw new Error(
+        `${configPath} has an mcpServers value that is not an object (found ${Array.isArray(existing.mcpServers) ? "array" : typeof existing.mcpServers}). Fix or remove it, then re-run.`,
+      );
+    }
+  }
   const mcpServers =
     existing.mcpServers && typeof existing.mcpServers === "object"
       ? (existing.mcpServers as Record<string, unknown>)

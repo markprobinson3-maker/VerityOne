@@ -13,6 +13,13 @@ import { NodeVariantCreateSchema } from "../schemas/nodes.schema";
 
 const nodes = new Hono();
 
+// Cap edges returned per node (batch-31). Hub nodes carry up to ~694 edges, each
+// materializing neighbor substance. The cap is applied AFTER the per-scope
+// readability filter (a raw SQL LIMIT could return mostly-private rows that the
+// filter then strips, hiding readable neighbors), so callers always get up to
+// NODE_EDGE_CAP of their actually-visible, highest-confidence edges.
+const NODE_EDGE_CAP = 200;
+
 // GET /nodes/:addr — Single node with neighbors
 // ?raw=true to include embedding and unparsed fields
 nodes.get("/:addr", async (c) => {
@@ -186,13 +193,18 @@ nodes.get("/:addr", async (c) => {
   // Increment query hits (this node was useful enough to fetch)
   await sql`SELECT increment_query_hits(${[addr]}::text[])`;
 
+  // Cap post-filter (edges is already ORDER BY confidence DESC and, for
+  // non-operators, readability-filtered) so the response is bounded for hubs.
+  const edgesTruncated = edges.length > NODE_EDGE_CAP;
+  const cappedEdges = edgesTruncated ? edges.slice(0, NODE_EDGE_CAP) : edges;
   return c.json({
     node,
     children,
-    edges: edges.map((edge: any) => ({
+    edges: cappedEdges.map((edge: any) => ({
       ...edge,
       role: classifyGraphEdgeRole(edge.edge_type),
     })),
+    ...(edgesTruncated ? { edges_truncated: true } : {}),
     ontology,
   });
 });

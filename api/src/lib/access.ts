@@ -48,6 +48,34 @@ function isVercelRuntimeLike(env: EnvLike): boolean {
     Boolean(trimmedEnv(env, "VERCEL_URL"));
 }
 
+// Placeholder substrings that betray an unrotated/missing secret. Kept hyphenated/
+// multi-word so a legitimate high-entropy secret cannot collide.
+const PLACEHOLDER_TOKEN_SUBSTRINGS = [
+  "change-me-in-beta",
+  "change-me-in-production",
+  "your-secret-here",
+  "replace-with-your",
+];
+
+function isPlaceholderTokenValue(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  if (!v) return false;
+  return PLACEHOLDER_TOKEN_SUBSTRINGS.some((p) => v.includes(p));
+}
+
+/**
+ * Authoritative production/serverless signal — mirrors requiresTrustProxy() above and
+ * isServerlessLike in hosted-connector-deployment.ts. In this mode the dev/test fixture
+ * token defaults (DEFAULT_BETA_TOKEN / DEFAULT_OPERATOR_TOKEN) must never authenticate.
+ * NODE_ENV=test is the explicit dev/test escape hatch (independently forbidden on
+ * serverless by the deployment validator), so it is never production here.
+ */
+function isProductionAuthMode(env: EnvLike = process.env): boolean {
+  if (trimmedEnv(env, "NODE_ENV") === "test") return false;
+  return trimmedEnv(env, "VERITY_DEPLOYMENT_PROFILE") === SERVERLESS_PROFILE ||
+    isVercelRuntimeLike(env);
+}
+
 function requiresTrustProxy(env: EnvLike): boolean {
   return trimmedEnv(env, "VERITY_DEPLOYMENT_PROFILE") === SERVERLESS_PROFILE ||
     isVercelRuntimeLike(env);
@@ -155,14 +183,86 @@ function parseAgentTenantMap(raw: string | undefined): Map<string, string> {
   return byAgent;
 }
 
+function tokenSet(raw: string | undefined, fixtureFallback: string[]): Set<string> {
+  // In production mode there is NO fixture fallback: an empty/missing env yields an empty
+  // set so the well-known placeholders can never authenticate. In dev/test the fixture
+  // default is preserved (unchanged behavior).
+  const prod = isProductionAuthMode();
+  const parsed = parseCsvSet(raw, prod ? [] : fixtureFallback);
+  // Defense in depth: even if a placeholder somehow lands in the env, never treat it as a
+  // valid token in production.
+  if (prod) {
+    for (const value of [...parsed]) {
+      if (isPlaceholderTokenValue(value)) parsed.delete(value);
+    }
+  }
+  return parsed;
+}
+
 function currentConfig() {
   return {
-    betaTokens: parseCsvSet(process.env.VERITY_BETA_TOKENS, [DEFAULT_BETA_TOKEN]),
-    operatorTokens: parseCsvSet(process.env.VERITY_OPERATOR_TOKENS, [DEFAULT_OPERATOR_TOKEN]),
+    betaTokens: tokenSet(process.env.VERITY_BETA_TOKENS, [DEFAULT_BETA_TOKEN]),
+    operatorTokens: tokenSet(process.env.VERITY_OPERATOR_TOKENS, [DEFAULT_OPERATOR_TOKEN]),
     agentTokens: parseAgentTokenMap(process.env.VERITY_AGENT_TOKENS),
     agentTenants: parseAgentTenantMap(process.env.VERITY_AGENT_TENANTS),
     allowedOrigins: parseCsvSet(process.env.VERITY_CORS_ORIGINS, DEFAULT_ALLOWED_ORIGINS),
   };
+}
+
+/**
+ * Boot guard: in production/serverless mode, REFUSE BOOT when the auth token envs are
+ * absent or placeholder-like. Throws a names-only Error (never a secret value). Called
+ * once at module load from app.ts so BOTH the long-lived launcher and the Vercel cold-start
+ * import fail closed instead of serving a node where "change-me-in-production" is a valid
+ * operator bearer. Dev/test (non-serverless, no VERCEL_*, or NODE_ENV=test) is a no-op.
+ */
+export function assertAuthSecretsConfigured(env: EnvLike = process.env): void {
+  if (!isProductionAuthMode(env)) return;
+  const problems: string[] = [];
+  const check = (key: string, required: boolean) => {
+    const raw = trimmedEnv(env, key);
+    if (!raw) {
+      if (required) problems.push(`${key} is not set`);
+      return;
+    }
+    const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
+    if (required && values.length === 0) {
+      problems.push(`${key} is not set`);
+      return;
+    }
+    if (values.some((v) => isPlaceholderTokenValue(v))) {
+      problems.push(`${key} contains an unrotated placeholder value`);
+    }
+  };
+  check("VERITY_OPERATOR_TOKENS", true);
+  check("VERITY_BETA_TOKENS", true);
+  // VI_WEBHOOK_KEY is optional (no webhook ingestion => unset is fine) but a placeholder
+  // value must never ship.
+  check("VI_WEBHOOK_KEY", false);
+  if (problems.length > 0) {
+    throw new Error(
+      "Refusing to boot in production: auth secrets are misconfigured — " +
+        problems.join("; ") +
+        ". Set rotated values for VERITY_OPERATOR_TOKENS and VERITY_BETA_TOKENS (and " +
+        "VI_WEBHOOK_KEY if used).",
+    );
+  }
+}
+
+/**
+ * Safe agent-id shape (1-80 chars: letters/digits/_-.:) shared by the /connect onboarding
+ * surface. Rejecting anything else stops /connect?agent=... from persisting arbitrary-
+ * length / arbitrary-content identifiers into agent_profiles.
+ */
+export const SAFE_AGENT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,80}$/;
+
+export function isSafeAgentId(value: string): boolean {
+  return SAFE_AGENT_ID_PATTERN.test(value);
+}
+
+/** Detect a VO token-looking string so a leaked secret is never persisted or echoed back. */
+export function looksLikeVoSecret(value: string): boolean {
+  return /\bv(?:op|oc|ocr|oca|ons|os|oa|odg)_[A-Za-z0-9._~+/=-]{12,}\b/.test(value);
 }
 
 function isAllowedOrigin(origin: string, requestUrl: string, allowedOrigins: Set<string>): boolean {
@@ -179,6 +279,35 @@ function isAllowedOrigin(origin: string, requestUrl: string, allowedOrigins: Set
     return false;
   }
 
+  return false;
+}
+
+/**
+ * Exact-host CORS validation for the browser-session bridge (the local VO node's
+ * browser-capture endpoint). Replaces a substring `origin.includes("verityone.app")`
+ * check that accepted suffix/prefix/authority-injection origins such as
+ * `https://verityone.app.evil.test`, `https://evilverityone.app`, and
+ * `https://verityone.app@evil.test`. Fail-closed: only an http(s) origin whose parsed
+ * host is exactly `verityone.app`, a well-formed `*.verityone.app` subdomain, or
+ * loopback (`localhost` / `127.0.0.1`, any port) is accepted.
+ */
+export function isValidBrowserSessionOrigin(origin: string): boolean {
+  if (!origin) return false;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const host = url.hostname;
+  if (host === "verityone.app") return true;
+  if (host.endsWith(".verityone.app")) {
+    // Require ≥1 non-empty DNS label before ".verityone.app" (rejects ".verityone.app").
+    const label = host.slice(0, -".verityone.app".length);
+    return /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*$/.test(label);
+  }
+  if (host === "localhost" || host === "127.0.0.1") return true;
   return false;
 }
 

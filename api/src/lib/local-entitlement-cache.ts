@@ -236,14 +236,14 @@ export function readEntitlementPausedReplay(): PausedEntitlementRow[] {
   try {
     const raw = JSON.parse(fs.readFileSync(replayPath(), "utf8"));
     if (!Array.isArray(raw?.rows)) {
-      clearEntitlementPausedReplay();
+      quarantineEntitlementPausedReplay();
       return [];
     }
     const filtered = raw.rows.filter((r: any) => typeof r?.seq === "number" && typeof r?.item_key === "string");
     if (filtered.length !== raw.rows.length) writeEntitlementPausedReplay(filtered);
     return filtered;
   } catch {
-    clearEntitlementPausedReplay();
+    quarantineEntitlementPausedReplay();
     return [];
   }
 }
@@ -263,4 +263,17 @@ export function appendEntitlementPausedReplay(rows: PausedEntitlementRow[]): voi
 
 export function clearEntitlementPausedReplay(): void {
   try { fs.unlinkSync(replayPath()); } catch { /* already gone */ }
+}
+
+// On a corrupt/unparseable replay file, PRESERVE the bytes for recovery instead
+// of unlinking them (batch-31). The replay queue is the only durable copy of the
+// entitlement-paused rows the sync cursor already advanced past; silently
+// destroying it on a parse error permanently strands those rows. Rename to a
+// timestamped quarantine path and let the caller return []. A missing file is a
+// no-op (existsSync guards it), matching the old clear()-on-ENOENT behavior.
+function quarantineEntitlementPausedReplay(): void {
+  try {
+    const p = replayPath();
+    if (fs.existsSync(p)) fs.renameSync(p, `${p}.corrupt-${Date.now()}`);
+  } catch { /* best effort — never throw out of the read path */ }
 }

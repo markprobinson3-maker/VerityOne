@@ -34,7 +34,17 @@ import postgres from "postgres";
 const sql = postgres("postgresql://localhost:5432/verity");
 
 const CONVENE_URL = "http://localhost:3100/swarm/convene";
-const DAILY_BUDGET_USD = parseFloat(process.argv.find(a => a.startsWith("--budget"))?.split("=")[1] || "0.50");
+// batch-31: accept BOTH `--budget 1.00` (the form the usage header + miners/CLAUDE.md
+// document) and `--budget=1.00`. The old split("=")[1] silently dropped the spaced
+// form, so the operator override was ignored (fell back to 0.50).
+function parseBudgetArg(): number {
+  const i = process.argv.findIndex((a) => a === "--budget" || a.startsWith("--budget="));
+  if (i < 0) return 0.50;
+  const raw = process.argv[i].includes("=") ? process.argv[i].split("=")[1] : process.argv[i + 1];
+  const n = parseFloat(raw || "");
+  return Number.isFinite(n) && n > 0 ? n : 0.50;
+}
+const DAILY_BUDGET_USD = parseBudgetArg();
 const COST_PER_CONVENE = 0.025; // ~$0.025 per 4-agent convene
 const COOLDOWN_HOURS = 4;
 const MAX_CONSECUTIVE_DRY = 3;
@@ -158,11 +168,22 @@ async function findLowConfidence(): Promise<FuelSource[]> {
 // --- Regulation ---
 
 async function getSpendToday(): Promise<number> {
-  const [result] = await sql`
+  // batch-31: the flat [convene]-count × COST_PER_CONVENE proxy ignored ALL
+  // downstream worker spend (qc-sentinel Gemini-Pro review, ingest, distiller),
+  // so the daily cap undercounted true Gemini cost. Add the real worker_llm_spend
+  // ledger for that downstream spend. The swarm's own convenes are not yet
+  // recorded in the ledger, so KEEP the proxy for them (when convene is
+  // instrumented into worker_llm_spend, drop the proxy to avoid double-counting).
+  const [convenes] = await sql`
     SELECT COUNT(*) AS convenes FROM query_log
     WHERE query LIKE '[convene]%'
       AND created_at > CURRENT_DATE`;
-  return parseInt(result.convenes) * COST_PER_CONVENE;
+  const [ledger] = await sql`
+    SELECT COALESCE(SUM(cost_usd_micro), 0)::bigint AS micro FROM worker_llm_spend
+    WHERE occurred_at >= CURRENT_DATE`;
+  const conveneEstimate = parseInt(convenes.convenes) * COST_PER_CONVENE;
+  const ledgerUsd = Number(ledger.micro) / 1e6;
+  return conveneEstimate + ledgerUsd;
 }
 
 async function isOnCooldown(topicHash: string): Promise<boolean> {

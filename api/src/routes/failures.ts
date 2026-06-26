@@ -15,7 +15,7 @@ import { Hono } from "hono";
 import { sql } from "../db";
 import { allowedRegistryAccessLevels, getAccessContext } from "../lib/access";
 import { GLOBAL_SPACE_ID } from "../lib/spaces";
-import { clampInt } from "../lib/utils";
+import { clampInt, MAX_OFFSET } from "../lib/utils";
 
 const failures = new Hono();
 
@@ -28,7 +28,7 @@ failures.get("/", async (c) => {
   const pyramid = c.req.query("pyramid") || null;
   const q = (c.req.query("q") || "").replace(/\0/g, "");
   const limit = clampInt(c.req.query("limit"), 30, 1, 100);
-  const offset = clampInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+  const offset = clampInt(c.req.query("offset"), 0, 0, MAX_OFFSET);
 
   // Failure patterns live in two places:
   // 1. Nodes with failure_warnings in substance (from atom_feedback incidents)

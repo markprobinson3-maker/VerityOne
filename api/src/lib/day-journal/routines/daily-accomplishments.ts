@@ -62,7 +62,7 @@ const MAX_TOP_PROJECTS = 8;
 const INVISIBLE_MARKER = "\uE000";
 const INVISIBLE_TEXT_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
 const INVISIBLE_MARKER_RE = /\uE000/g;
-// The VO-token alternative enumerates real token prefixes only (vop_REDACTED,
+// The VO-token alternative enumerates real token prefixes only (vop_,
 // voc_, vocr_, voca_, vobc_, vodg_, vons_, vos_, voa_) and requires a
 // body of at least 6 chars. Command-only prefixes like voj_, vor_,
 // vow_, vol_ are deliberately excluded so short slug tags such as

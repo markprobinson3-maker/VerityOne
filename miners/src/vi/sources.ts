@@ -7,7 +7,11 @@
 
 import { existsSync } from "fs";
 import { SOURCE_REGISTRY, type SourceProfile } from "./config";
+import { ssrfGuardedFetch } from "../../../api/src/lib/ssrf-guard";
 import { discoverEmbeddedPdfUrl } from "../lib/pdf-discovery";
+
+// Cap the response body so an attacker-pointed URL can't OOM the ingester (batch-32 VI-3).
+const WEB_FETCH_MAX_BYTES = Number(process.env.VERITY_HTML_URL_MAX_BYTES) || 5 * 1024 * 1024;
 import { extractPdfText } from "../lib/pdf-extract";
 import { extractRemoteDocument } from "../lib/web-html";
 
@@ -84,15 +88,20 @@ export async function extractContent(input: string, sourceType: string): Promise
 
 // --- Web adapter: fetch + strip HTML ---
 async function extractWeb(url: string): Promise<ExtractionResult> {
-  const res = await fetch(url, {
+  // ssrfGuardedFetch re-checks every redirect hop against the private-IP guard
+  // (batch-32 VI-2) — a plain redirect:"follow" let a public URL 302 into an
+  // internal address. The guard forces redirect:"manual" internally.
+  const res = await ssrfGuardedFetch(url, {
     headers: { "User-Agent": "Verity-Ingest/0.5 (knowledge-graph)" },
-    redirect: "follow",
   });
 
   if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+  const declaredLen = parseInt(res.headers.get("content-length") || "0", 10);
+  if (declaredLen > WEB_FETCH_MAX_BYTES) throw new Error(`Response too large (${declaredLen} bytes > ${WEB_FETCH_MAX_BYTES} cap)`);
 
   const contentType = res.headers.get("content-type") || "";
   const body = await res.text();
+  if (body.length > WEB_FETCH_MAX_BYTES) throw new Error(`Response too large (${body.length} bytes > ${WEB_FETCH_MAX_BYTES} cap)`);
   const extracted = extractRemoteDocument(url, body, { contentType });
   const embeddedPdfUrl = extracted.format === "html" ? discoverEmbeddedPdfUrl(url, body) : null;
   if (embeddedPdfUrl) {

@@ -2,7 +2,8 @@
   "name": "vo-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first stdio MCP server for Verity One. Thin transport adapter over 127.0.0.1:3100.",
+  "license": "MIT",
+  "description": "Local-first stdio MCP server for Verity One. Thin transport adapter over 127.0.0.1:3100. MIT-licensed (same as the repo root LICENSE); `private: true` only means it is not published to npm — it ships in the public source tree and builds locally.",
   "type": "module",
   "main": "./dist/server.js",
   "bin": {

@@ -506,28 +506,37 @@ export async function listRecentTenantEvents(
   const projectFilter = projectAddr
     ? sql`AND n.substance->>'project_addr' = ${projectAddr}`
     : sql``;
+  // One row PER MEMORY (its most recent event), not one row per event. A memory that
+  // was created then promoted/updated has several memory_events rows with the same addr;
+  // surfacing all of them rendered the same memory two-or-more times back-to-back in the
+  // Activity feed, which reads as a bug to a human. DISTINCT ON (e.addr) keeps only the
+  // latest event per memory; the outer query restores recency order across memories.
   return sql`
-    SELECT
-      e.addr,
-      n.label,
-      n.substance->>'memory_type' as kind,
-      e.event_type,
-      e.actor,
-      e.created_at,
-      e.event_data,
-      n.substance->>'project_addr' as project_addr
-    FROM memory_events e
-    -- MT13: INNER join — only surface events whose addr maps to a LIVE node in the
-    -- caller's space. memory_events has no FK to nodes, so a stale/orphan event (node
-    -- deleted, or addr reused by another tenant) must NOT surface its addr here. A LEFT
-    -- join returned e.addr with a null node, leaking a reused addr now owned elsewhere.
-    JOIN nodes n
-      ON n.addr = e.addr
-      AND n.space_id = ${spaceId}
-      AND n.visibility <> 'deleted'
-    WHERE e.tenant_id = ${tenantId}
-    ${projectFilter}
-    ORDER BY e.created_at DESC
+    SELECT addr, label, kind, event_type, actor, created_at, event_data, project_addr
+    FROM (
+      SELECT DISTINCT ON (e.addr)
+        e.addr,
+        n.label,
+        n.substance->>'memory_type' as kind,
+        e.event_type,
+        e.actor,
+        e.created_at,
+        e.event_data,
+        n.substance->>'project_addr' as project_addr
+      FROM memory_events e
+      -- MT13: INNER join — only surface events whose addr maps to a LIVE node in the
+      -- caller's space. memory_events has no FK to nodes, so a stale/orphan event (node
+      -- deleted, or addr reused by another tenant) must NOT surface its addr here. A LEFT
+      -- join returned e.addr with a null node, leaking a reused addr now owned elsewhere.
+      JOIN nodes n
+        ON n.addr = e.addr
+        AND n.space_id = ${spaceId}
+        AND n.visibility <> 'deleted'
+      WHERE e.tenant_id = ${tenantId}
+      ${projectFilter}
+      ORDER BY e.addr, e.created_at DESC
+    ) sub
+    ORDER BY created_at DESC
     LIMIT ${limit}
   `;
 }

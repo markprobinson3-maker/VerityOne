@@ -1,5 +1,13 @@
 /** Shared API utilities — eliminate repeated inline patterns */
 
+/**
+ * Global pagination offset cap. List endpoints already cap `limit` but historically left
+ * `offset` unbounded, so a caller could request offset=9_999_999_999 and force Postgres to
+ * scan + skip billions of rows (a DB-cost / DoS vector). Shared cores reject offsets above
+ * this; standalone endpoints clamp to it.
+ */
+export const MAX_OFFSET = 10_000;
+
 /** Round a numeric value to 3 decimal places, handling stringified numbers */
 export const roundFloat = (v: any): number =>
   parseFloat(parseFloat(v).toFixed(3));

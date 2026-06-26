@@ -167,8 +167,12 @@ export function enforceRecallScope() {
         storedMetadata = row.metadata as Record<string, unknown>;
       }
     } catch {
-      // DB error → fail open (allow public reads). Agent-policy DB failure
-      // should not break the public-read path.
+      // DELIBERATE fail-open, scoped to READS only. The narrowing this middleware applies
+      // merely EXCLUDES the public overlay (GLOBAL_SPACE_ID) for tenant_private agents — so a
+      // failed lookup here can at most over-expose PUBLIC graph data (not secret tenant data)
+      // to a tenant_private agent. Failing closed (narrowing for everyone) would instead break
+      // legitimate public reads for the common tenant_and_public agents on a transient DB blip.
+      // The authority-bearing path — WRITES — fails CLOSED (see enforceWritePermission below).
       await next();
       return;
     }
@@ -237,10 +241,15 @@ export function enforceWritePermission(db: typeof sql = sql) {
         storedMetadata = row.metadata as Record<string, unknown>;
       }
     } catch {
-      // DB error → fail open (allow write). An agent-policy DB failure
-      // should not break the write path. Log and proceed.
-      await next();
-      return;
+      // SECURITY: fail CLOSED. A failed agent_profiles lookup means we cannot verify the
+      // agent's write_permission — and an explicitly write-DENIED agent must not be able to
+      // write just because the policy DB hiccupped (the old fail-open allowed exactly that).
+      // This matches the stricter hosted write-policy posture. 503 (not 403) signals a
+      // transient condition so a legitimate caller can retry.
+      return errorJson(c, "service_unavailable", {
+        details: { error_class: "agent_policy_unavailable", agent_id: access.agentId },
+        hint: "Agent write policy is temporarily unavailable; the write was not applied. Please retry.",
+      });
     }
 
     const effective = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings);

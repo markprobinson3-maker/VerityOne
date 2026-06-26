@@ -36,6 +36,31 @@ type SqlTag = ReturnType<typeof postgres>;
 // two surfaces cannot drift in casing or copy.
 export const REMOTE_COMMAND_CANCEL_ACTOR = "tenant_session";
 
+/**
+ * Stable idempotency key for a hosted-browser command, derived from a
+ * per-render form nonce. The generic analogue of the mirrored-sync
+ * handshake's `mirroredSyncIdempotencyKey` for the `/my/*\/command`
+ * surfaces: a browser double-submit (back / refresh / double-click) of
+ * the SAME rendered form replays the SAME nonce, so queueCommand dedups
+ * it via `ON CONFLICT (tenant_id, idempotency_key)`. A fresh page render
+ * mints a new nonce, so a deliberate repeat of the same action stays a
+ * distinct intent.
+ *
+ * The (category, commandType) segments keep the key self-describing and
+ * collision-proof across command classes; the per-render nonce carries
+ * the entropy. NOTE: the key is intentionally never surfaced in any
+ * telemetry / activity payload — only command_id/category/command_type
+ * are emitted (see emitWriteIntentForQueuedCommand).
+ */
+export function hostedCommandIdempotencyKey(
+  tenantId: string,
+  category: string,
+  commandType: string,
+  nonce: string,
+): string {
+  return `hosted_cmd:${tenantId}:${category}:${commandType}:${nonce}`;
+}
+
 // ── Payload encryption for sensitive commands ────────────────────────
 // Uses AES-256-GCM with a key derived from VERITY_QUEUE_SECRET. New
 // envelopes carry a version so operators can rotate by setting
@@ -647,7 +672,7 @@ export async function claimCommand(
  * Claim with the hosted-MCP-origin credential gate in the same lock path.
  * Browser-session rows retain the existing claim semantics. Hosted-agent
  * rows are checked by credential_id/account/link/agent_id, never by a
- * raw vop_REDACTED* token, because /remote/claim is sync-token authenticated.
+ * raw vop_* token, because /remote/claim is sync-token authenticated.
  */
 export async function claimCommandWithOriginCheck(
   sql: SqlTag,

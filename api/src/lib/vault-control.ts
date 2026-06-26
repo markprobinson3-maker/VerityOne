@@ -40,7 +40,7 @@ import {
   resolveVaultRoot as resolveSharedVaultRoot,
   type VaultRootSource as SharedVaultRootSource,
 } from "@verity-one/vault-root";
-import { resolveConfigPath, resolveTenantSettings, type VaultSync } from "./runtime-profile";
+import { resolveConfigPath, resolveTenantSettings, writeLocalConfigAtomic0600, type VaultSync } from "./runtime-profile";
 import { listFinalizedDossierMetadata } from "./vault-metadata";
 import { scaffoldVault, VaultScaffoldError } from "./vault-scaffold";
 import { buildObsidianOpenUrl } from "./vault-write";
@@ -345,9 +345,8 @@ function writeConfigField(
   } else {
     existing[field] = value;
   }
-  const tmp = `${cfgPath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(existing, null, 2));
-  fs.renameSync(tmp, cfgPath);
+  // 0600 atomic writer (batch-25 #1) — keep config.json owner-only.
+  writeLocalConfigAtomic0600(cfgPath, existing);
   return { configPath: cfgPath, previous, next: value };
 }
 

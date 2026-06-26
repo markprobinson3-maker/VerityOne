@@ -106,15 +106,15 @@ function summarizeOutcome(o: { kind: string; [k: string]: unknown }): string {
       return `Harvest complete — ${w} atom(s) written, ${d} deduped. Local vault authoritative.`;
     }
     case "stop_missing_key":
-      return "Stopped — AI model API key not configured. Run `vo onboard` locally.";
+      return "Stopped — AI model API key not configured. Set an AI provider key (e.g. GOOGLE_API_KEY) in your environment or ~/.vo/secrets.env, then retry.";
     case "stop_vo_unavailable": {
       const sub = typeof o.subReason === "string" ? o.subReason : "unknown";
       if (sub === "all_writes_failed") {
         const total = typeof o.atomsProposed === "number" ? o.atomsProposed : 0;
         return `Stopped — 0 of ${total} atoms reached the VO graph. Local files preserved.`;
       }
-      if (sub === "missing_tenant_auth") return "Stopped — VO tenant auth missing. Run `vo init --tenant <id>`.";
-      if (sub === "unreachable") return "Stopped — local VO unreachable. Start the VO node, then resume via `vo vault confirm`.";
+      if (sub === "missing_tenant_auth") return "Stopped — VO tenant auth missing. Ensure ~/.vo/config.json carries agent_token + tenant_id (the installer / bootstrap-local.sh writes these), then retry.";
+      if (sub === "unreachable") return "Stopped — local VO unreachable. Start your local VO node, then re-run the harvest.";
       return "Stopped — VO could not complete the graph write.";
     }
     case "stop_finalize_conflict":

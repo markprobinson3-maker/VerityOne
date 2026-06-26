@@ -25,7 +25,7 @@ export interface InferenceInput {
   cwd?: string;
   /** Workspace or directory name */
   workspace_name?: string;
-  /** Git remote URL or slug (e.g., "ghost-mastering" or "github.com/user/ghost-mastering") */
+  /** Git remote URL or slug (e.g., "my-app" or "github.com/user/my-app") */
   repo_slug?: string;
   /** Optional task goal for context */
   goal?: string;

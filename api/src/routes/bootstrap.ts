@@ -16,9 +16,14 @@ import { compileRecall } from "../lib/recall-compiler";
 import { resolveAgentPolicy } from "../lib/agent-policy";
 import { resolveTenantSettings } from "../lib/runtime-profile";
 import { errorJson, ApiError } from "../lib/error-envelope";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 import { auditMutation } from "../lib/audit";
 
 const bootstrap = new Hono();
+
+// Bootstrap payloads are small (goal/cwd/workspace_name/repo_slug/addr); cap well
+// below the heavy-route norm (batch-26).
+const BOOTSTRAP_MAX_BODY_BYTES = 100_000;
 
 bootstrap.post("/project", async (c) => {
   const access = getAccessContext(c);
@@ -26,7 +31,9 @@ bootstrap.post("/project", async (c) => {
     return errorJson(c, "tenant_required", { message: "Tenant auth required for project bootstrap." });
   }
 
-  const body = await c.req.json().catch(() => null);
+  const parsed = await readBoundedJsonBody(c, BOOTSTRAP_MAX_BODY_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value;
   if (!body) {
     return errorJson(c, "invalid_request", { message: "Request body required" });
   }
@@ -81,10 +88,14 @@ bootstrap.post("/project", async (c) => {
       if (row?.metadata && typeof row.metadata === "object") {
         storedMetadata = row.metadata as Record<string, unknown>;
       }
-    } catch { /* DB error → no filtering */ }
-    const machineSettings = resolveTenantSettings();
-    const effective = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings);
-    visibleProjectAddrs = effective.visible_projects;
+      const machineSettings = resolveTenantSettings();
+      visibleProjectAddrs = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings).visible_projects;
+    } catch {
+      // SECURITY: fail CLOSED. Could not load the agent's project policy → do NOT widen to
+      // the permissive default (visible_projects=null=all). Restrict to no projects ([], which
+      // the !visibleProjectAddrs consumers treat as deny) until the policy DB is readable.
+      visibleProjectAddrs = [];
+    }
   }
 
   let projectMemory: {

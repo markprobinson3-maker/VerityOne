@@ -36,6 +36,7 @@ import path from "node:path";
 import { sql } from "../db";
 import { getAccessContext } from "../lib/access";
 import { errorJson, ApiError } from "../lib/error-envelope";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 import { auditMutation } from "../lib/audit";
 
 function isUrl(input: string): boolean {
@@ -43,6 +44,10 @@ function isUrl(input: string): boolean {
 }
 
 const machineVault = new Hono();
+
+// Byte ceiling for /machine/vault JSON bodies (batch-25 #3). Vault config
+// payloads (root path, harvest opts) are small; cap well under the 2MB norm.
+const MACHINE_VAULT_MAX_BODY_BYTES = 256_000;
 
 /**
  * Test-only override for the harvest engine. Production leaves this
@@ -109,7 +114,9 @@ machineVault.post("/harvest-auto", async (c) => {
     });
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsedBody = await readBoundedJsonBody(c, MACHINE_VAULT_MAX_BODY_BYTES);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = (parsedBody.value ?? {}) as Record<string, unknown>;
   const source = typeof body.source === "string" ? body.source.trim() : "";
   if (!source) {
     return errorJson(c, "invalid_request", {
@@ -252,7 +259,9 @@ machineVault.post("/root", async (c) => {
     });
   }
 
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsedBody = await readBoundedJsonBody(c, MACHINE_VAULT_MAX_BODY_BYTES);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = (parsedBody.value ?? {}) as Record<string, unknown>;
   const raw = body.root;
 
   // Distinguish three shapes: absolute path, explicit null (clear), and

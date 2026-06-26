@@ -623,9 +623,11 @@ export function extractTomlStringValue(section: string, key: string): string | n
 
 /** Extract a top-level `key = ["...", "..."]` array of basic strings
  *  from a TOML section body. Returns `null` if the key is absent or
- *  the value is not a same-line array of basic strings. */
+ *  the value is not an array of basic strings. Handles both the same-line
+ *  form and the valid TOML-1.0 multi-line form (batch-31): the body capture
+ *  spans newlines and stops at the first closing `]`. */
 export function extractTomlStringArray(section: string, key: string): string[] | null {
-  const re = new RegExp(`^\\s*${key}\\s*=\\s*\\[(.*)\\]\\s*$`, "m");
+  const re = new RegExp(`^\\s*${key}\\s*=\\s*\\[([\\s\\S]*?)\\]`, "m");
   const m = section.match(re);
   if (!m) return null;
   const body = m[1];

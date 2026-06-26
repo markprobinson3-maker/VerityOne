@@ -67,7 +67,9 @@ export type RateLimitedRoute =
   | "account_onboarding"
   | "hosted_mcp_write"
   | "remote_queue"
-  | "sync_push";
+  | "sync_push"
+  | "sync_poll"
+  | "sync_token_issuance";
 
 export const RATE_LIMITED_ROUTES: readonly RateLimitedRoute[] = [
   "account_link",
@@ -77,6 +79,8 @@ export const RATE_LIMITED_ROUTES: readonly RateLimitedRoute[] = [
   "hosted_mcp_write",
   "remote_queue",
   "sync_push",
+  "sync_poll",
+  "sync_token_issuance",
 ] as const;
 
 export type TokenBucketRateLimitedRoute = Exclude<RateLimitedRoute, "account_onboarding">;
@@ -92,6 +96,8 @@ export const TOKEN_BUCKET_RATE_LIMITED_ROUTES: readonly TokenBucketRateLimitedRo
   "hosted_mcp_write",
   "remote_queue",
   "sync_push",
+  "sync_poll",
+  "sync_token_issuance",
 ] as const;
 
 /** Env-driven config with safe defaults. Per-route overrides
@@ -138,6 +144,26 @@ function loadConfig(route: TokenBucketRateLimitedRoute): BucketConfig {
           ),
         ),
       };
+    case "sync_poll":
+      // The local-node poller hits /remote/pending every ~30s and /remote/claim
+      // once per pending command, so legitimate traffic is bursty-but-bounded.
+      // Allow a generous burst (claim storms after a backlog) on a higher
+      // sustained rate; the cap exists to stop a buggy/compromised node from
+      // hammering sync-token resolution + command reads, not to throttle normal
+      // polling.
+      return {
+        burst: Math.max(
+          MIN_BURST,
+          readInt("VO_RATE_LIMIT_SYNC_POLL_BURST", Math.max(MIN_BURST, base_burst * 4)),
+        ),
+        per_minute: Math.max(
+          MIN_PER_MINUTE,
+          readInt(
+            "VO_RATE_LIMIT_SYNC_POLL_PER_MINUTE",
+            Math.max(MIN_PER_MINUTE, base_per_minute * 4),
+          ),
+        ),
+      };
     case "account_link":
     case "account_connect":
     case "account_drive":
@@ -177,6 +203,28 @@ function loadConfig(route: TokenBucketRateLimitedRoute): BucketConfig {
           readInt(
             "VO_RATE_LIMIT_HOSTED_MCP_WRITE_PER_MINUTE",
             Math.max(MIN_PER_MINUTE, base_per_minute),
+          ),
+        ),
+      };
+    case "sync_token_issuance":
+      // Per-account budget on sync-token MINTING (claim + loopback-claim +
+      // rotate). One token per node is the legitimate shape; even a power
+      // user with several nodes mints only a handful, occasionally rotating.
+      // The tight clamp (same floor as the account-facing flows) stops a
+      // compromised/abusive session from minting unbounded one-time tokens.
+      return {
+        burst: Math.max(
+          MIN_BURST,
+          readInt(
+            "VO_RATE_LIMIT_SYNC_TOKEN_ISSUANCE_BURST",
+            Math.max(MIN_BURST, Math.floor(base_burst / 2)),
+          ),
+        ),
+        per_minute: Math.max(
+          MIN_PER_MINUTE,
+          readInt(
+            "VO_RATE_LIMIT_SYNC_TOKEN_ISSUANCE_PER_MINUTE",
+            Math.max(MIN_PER_MINUTE, Math.floor(base_per_minute / 2)),
           ),
         ),
       };
@@ -432,4 +480,22 @@ export function syncPushKey(input: {
   node_id: string;
 }): string {
   return `t:${input.tenant_id}|n:${input.node_id}`;
+}
+
+/** Sync-node poll key shared by `/remote/pending` and `/remote/claim`:
+ *  tenant + node, sync-token-bound. Bounds the local-node poller's reads/claims
+ *  so a compromised sync token cannot hammer pending-command resolution. */
+export function syncPollKey(input: {
+  tenant_id: string;
+  node_id: string;
+}): string {
+  return `t:${input.tenant_id}|n:${input.node_id}`;
+}
+
+/** Sync-token issuance key: per-account budget shared by every minting path
+ *  (`/account/sync-token/claim`, `/account/sync-token/claim-local/confirm`,
+ *  `/account/nodes/:node_id/sync-token/rotate`). Keyed by account so a single
+ *  session cannot mint unbounded one-time sync tokens across its nodes. */
+export function syncTokenIssuanceKey(input: { account_id: string }): string {
+  return `a:${input.account_id}`;
 }

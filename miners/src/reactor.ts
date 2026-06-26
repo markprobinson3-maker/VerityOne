@@ -444,8 +444,14 @@ export async function processStimulus(stimulusId: number): Promise<void> {
 
     if (overlapPct <= 0.6) continue;
 
-    // Determine detection method
-    const hasExplicitMarker = /(patch|fix|supersed|correct|retract|update[ds]?)\b/i.test(stim.content) && sim > 0.80;
+    // Determine detection method.
+    // batch-31: the prior gate (broad regex + sim>0.80, any source) auto-zeroed a
+    // still-relevant older signal's heat on benign prose ("we update the bound",
+    // "patch released") or a cross-source coincidence. Tightened to a
+    // retraction-anchored marker AND high similarity AND same source; anything
+    // weaker falls through to a 'pending' candidate (no zeroing) for review.
+    const RETRACTION_MARKER = /\b(retract(?:ed|ion)?|supersed(?:e|es|ed)|replaces?|errata|corrigend(?:um|a)?)\b/i;
+    const hasExplicitMarker = RETRACTION_MARKER.test(stim.content) && sim > 0.92 && stim.source === s.source;
     let detectionMethod: string;
 
     if (hasExplicitMarker) {

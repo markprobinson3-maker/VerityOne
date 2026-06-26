@@ -171,6 +171,27 @@ const websocketHandler: import("bun").WebSocketHandler<undefined> = {
     // Clients don't send messages; this is a broadcast-only stream
   },
 };
+
+// Last-resort process safety net (launch-readiness scan 2026-06-07, P1).
+// Without these, an unhandled rejection or uncaught exception in any async task
+// (scheduler tick, worker, fire-and-forget enrichment) is INVISIBLE — on the
+// tenant-default profile (no supervisor) it can mean silent downtime or silent
+// data-drift with no root-cause log. Make both LOUD.
+//   - uncaughtException leaves the process in an undefined state → log + exit so
+//     a supervisor / launchd / the operator restarts on a clean boot.
+//   - unhandledRejection is logged loudly but NOT fatal: crashing a live
+//     tenant-serving node on a single stray rejection trades data-drift risk for
+//     an availability outage. The loud log closes the "silent" gap (the scan's
+//     actual concern) while preserving uptime.
+process.on("unhandledRejection", (reason: unknown) => {
+  const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+  console.error("[unhandledRejection] (logged, non-fatal):", detail);
+});
+process.on("uncaughtException", (err: Error) => {
+  console.error("[uncaughtException] fatal — exiting for clean restart:", err?.stack ?? err?.message ?? err);
+  process.exit(1);
+});
+
 const server = Bun.serve({
   port,
   hostname: apiHostname,
@@ -244,6 +265,24 @@ server.reload({ fetch: wrappedFetch, websocket: websocketHandler });
 //     gated inside `startChangeStream` itself for belt-and-braces).
 startChangeStream();
 
+// 11b. Ops alerting — the proactive consumer of /ops/runtime. Inert unless
+//      ALERT_WEBHOOK_URL is set, so OSS installs and CI are unaffected.
+//      Runs on BOTH long-lived profiles (a full node wants paging too).
+import("./lib/ops-alert")
+  .then(({ startOpsAlertPoller }) => {
+    const handle = startOpsAlertPoller({ port });
+    if (handle) {
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        process.once(signal, () => {
+          try { handle.stop(); } catch { /* ignore */ }
+        });
+      }
+    }
+  })
+  .catch((err: Error) => {
+    console.error("ops-alert poller failed to start:", err?.message ?? err);
+  });
+
 // 12. Profile-gated subsystems per docs/VO-RUNTIME-PROFILES.md:
 //     - startScheduler() is the heavier VI adapter scheduler → full only
 //     - startMaintenanceCron() is the tenant-default T1 safety net → tenant-default only
@@ -254,29 +293,45 @@ startChangeStream();
 // see a heartbeat inside their ~10s window.
 if (RUNTIME_PROFILE === "full") {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  import("../../miners/src/vi/scheduler").then(({ startScheduler }) => {
-    startScheduler()
-      .then(() => {
-        console.log("VI Scheduler running");
-      })
-      .catch((err: Error) => {
-        console.error("VI Scheduler failed to start:", err.message);
-      });
-  });
+  import("../../miners/src/vi/scheduler")
+    .then(({ startScheduler }) => {
+      startScheduler()
+        .then(() => {
+          console.log("VI Scheduler running");
+        })
+        .catch((err: Error) => {
+          console.error("VI Scheduler failed to start:", err.message);
+        });
+    })
+    // The dynamic import itself can reject (module load error); without an outer
+    // .catch that rejection is unhandled. The full profile has a supervisor, but
+    // surface it loudly rather than silently.
+    .catch((err: Error) => {
+      console.error("VI Scheduler module failed to load:", err?.message ?? err);
+    });
 } else {
   // tenant-default: in-api maintenance cron instead of VI scheduler + supervisor workers
-  import("./lib/maintenance-cron").then(({ startMaintenanceCron }) => {
-    const cronHandle = startMaintenanceCron(tocSql);
-    for (const signal of ["SIGINT", "SIGTERM"] as const) {
-      process.once(signal, () => {
-        try {
-          cronHandle.stop();
-        } catch {
-          /* ignore */
-        }
-      });
-    }
-  });
+  import("./lib/maintenance-cron")
+    .then(({ startMaintenanceCron }) => {
+      const cronHandle = startMaintenanceCron(tocSql);
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        process.once(signal, () => {
+          try {
+            cronHandle.stop();
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+    })
+    // Without this .catch the rejection is unhandled and SILENT: on tenant-default
+    // there is no supervisor, so a failed import / startMaintenanceCron throw would
+    // mean vacuum, orphan cleanup, and memory-expiry never run while /health still
+    // reports ok — invisible per-tenant data-integrity drift. Match the sibling
+    // schedulers and surface it loudly.
+    .catch((err: Error) => {
+      console.error("Maintenance cron failed to start:", err?.message ?? err);
+    });
 }
 
 // 13. Sync scheduler — automatic background sync when hosted_sync = "outbound".

@@ -3,7 +3,7 @@
  * VO-PLUS-FEDERATION-STATE-MACHINES-PR-1.
  *
  * Typed source-of-truth for `hosted_agent_credentials.status`.
- * Hosted agent credentials (the `vop_REDACTED*` bearer tokens used
+ * Hosted agent credentials (the `vop_*` bearer tokens used
  * by hosted MCP) are either `active` or `revoked`. There
  * is intentionally no `suspended` middle state on a
  * credential — rung 8's policy layer expresses per-session

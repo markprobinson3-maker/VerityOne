@@ -2057,8 +2057,10 @@ function createPooledSql(extra = {}) {
     ...extra
   });
 }
-function createDirectSql(extra = {}) {
-  return src_default(getDatabaseUrl(), {
+function createDirectSql(extra = {}, dsn) {
+  // Optional 2nd `dsn` lets a caller target a specific DB without mutating the
+  // global DATABASE_URL (kept in sync with src/index.ts).
+  return src_default((dsn && dsn.trim()) || getDatabaseUrl(), {
     max: 40,
     idle_timeout: 20,
     connect_timeout: 10,

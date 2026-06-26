@@ -475,20 +475,32 @@ export function isUrl(input: string): boolean {
   return /^https?:\/\//i.test(input);
 }
 
-async function fetchUrlContent(url: string): Promise<{ content: string; title: string; sourceFilename: string }> {
+export async function fetchUrlContent(url: string): Promise<{ content: string; title: string; sourceFilename: string }> {
   const { extractRemoteDocument } = await import("../../../miners/src/lib/web-html");
 
-  const resp = await fetch(url, {
+  // SSRF guard at the fetcher itself (not only source-materialize's
+  // pre-check) so every caller — including direct harvest paths with
+  // agent-supplied URLs — is covered, with each redirect hop re-checked.
+  const { ssrfGuardedFetch } = await import("./ssrf-guard");
+  const resp = await ssrfGuardedFetch(url, {
     headers: {
       "User-Agent": "Verity-Vault/1.0 (knowledge-graph)",
       Accept: "text/html, text/plain, */*",
     },
-    redirect: "follow",
     signal: AbortSignal.timeout(30_000),
   });
 
   if (!resp.ok) {
     throw new Error(`Fetch failed: HTTP ${resp.status} ${resp.statusText}`);
+  }
+
+  // Bound the response size so a hostile/huge URL can't exhaust memory. Reject
+  // early on a too-large Content-Length, then re-check the actual decoded bytes
+  // (the header can be absent or lie).
+  const MAX_FETCH_BYTES = 4 * 1024 * 1024; // 4 MB
+  const declaredLen = Number(resp.headers.get("content-length") || "");
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_FETCH_BYTES) {
+    throw new Error(`Fetched page too large: ${declaredLen} bytes exceeds ${MAX_FETCH_BYTES}`);
   }
 
   const contentType = resp.headers.get("content-type") || "";
@@ -498,6 +510,9 @@ async function fetchUrlContent(url: string): Promise<{ content: string; title: s
   }
 
   const body = await resp.text();
+  if (Buffer.byteLength(body, "utf8") > MAX_FETCH_BYTES) {
+    throw new Error(`Fetched page too large: exceeds ${MAX_FETCH_BYTES} bytes`);
+  }
   if (body.trim().length === 0) {
     throw new Error("Fetched page is empty");
   }
@@ -1121,8 +1136,8 @@ See docs/vault-guide.md for human-facing setup and usage documentation.
 ### Prerequisites
 - Verity One running at the URL in \`.vo-vault.json\` (default: http://localhost:3100)
 - Obsidian installed (https://obsidian.md)
-- LLM provider configured — run \`vo onboard\` to set up your API key and task routing
-  (or set \`GOOGLE_API_KEY\` manually if you prefer)
+- LLM provider configured — set an AI provider key (e.g. \`GOOGLE_API_KEY\`) in your
+  environment or \`~/.vo/secrets.env\` (operators with the full \`vo\` CLI can run \`vo onboard\`)
 
 ### Setup
 \`\`\`bash

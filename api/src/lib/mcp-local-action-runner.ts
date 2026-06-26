@@ -6223,7 +6223,14 @@ async function runAcceptanceRecord(
   };
 }
 
-// ─── Audit helpers (in-memory ring buffer) ───────────────────────
+// ─── Audit helpers (in-memory ring buffer + durable local JSONL) ──
+//
+// The 64-entry in-memory ring gives the dashboard a fast "recent actions"
+// view, but it is wiped on every process restart — so the only record of a
+// security-sensitive local config mutation (Claude Desktop / Codex config
+// edits, backups, rollbacks) disappears the moment the node restarts. The
+// ring is now backed by a durable append-only JSONL trail under `~/.vo` so
+// the audit survives restarts (batch-24 #6).
 
 export interface AuditRecord {
   ts: string;
@@ -6242,13 +6249,102 @@ export interface AuditRecord {
 const AUDIT: AuditRecord[] = [];
 const AUDIT_CAP = 64;
 
+/** Durable append-only trail location. Tests override via
+ *  `VO_MCP_LOCAL_ACTION_AUDIT_PATH` so the suite never writes to the real
+ *  `~/.vo`. Resolved at call time (live `$HOME`), matching the rest of this
+ *  module's path resolution. */
+function auditFilePath(): string {
+  const override = process.env.VO_MCP_LOCAL_ACTION_AUDIT_PATH;
+  if (override && override.trim()) return override;
+  return path.join(claudeDesktopHomeDir(), ".vo", "mcp-local-action-audit.jsonl");
+}
+
+/** One prior generation is kept once the active file passes this size, so the
+ *  durable trail is bounded without dropping recent history. */
+const AUDIT_FILE_MAX_BYTES = 2_000_000;
+
+/** Append one record to the durable JSONL trail. Best-effort and fail-soft: a
+ *  persistence error must NEVER break the action being audited, so all I/O is
+ *  wrapped. The file is 0600 — records carry `tenant_id` + action summaries. */
+function persistAuditRecord(r: AuditRecord): void {
+  // In tests, persist only when a scratch path is explicitly provided, so the
+  // suite never touches the real `~/.vo`. Production (NODE_ENV ≠ "test") always
+  // persists; an explicit override always persists regardless of NODE_ENV.
+  const override = process.env.VO_MCP_LOCAL_ACTION_AUDIT_PATH;
+  if (!override && process.env.NODE_ENV === "test") return;
+  try {
+    const file = auditFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    // Bounded growth: rotate to a single `.1` backup once over the cap.
+    try {
+      if (fs.statSync(file).size >= AUDIT_FILE_MAX_BYTES) {
+        fs.renameSync(file, `${file}.1`);
+      }
+    } catch {
+      // No existing file → nothing to rotate.
+    }
+    fs.appendFileSync(file, `${JSON.stringify(r)}\n`, { mode: 0o600 });
+    // appendFileSync's mode only applies on create; re-assert for a file that
+    // may predate this writer.
+    try { fs.chmodSync(file, 0o600); } catch { /* best-effort */ }
+  } catch {
+    // Durable persistence is best-effort; the in-memory ring still holds it.
+  }
+}
+
 export function recordAudit(r: AuditRecord): void {
   AUDIT.push(r);
   if (AUDIT.length > AUDIT_CAP) AUDIT.splice(0, AUDIT.length - AUDIT_CAP);
+  persistAuditRecord(r);
 }
 export function listAudit(): readonly AuditRecord[] {
   return AUDIT.slice();
 }
+
+/** Read the durable audit trail (oldest → newest), surviving process restarts.
+ *  Parses the active file (the rotated `.1` generation is retained on disk but
+ *  not merged here). Fail-soft → `[]` on any error. `limit` returns only the
+ *  most recent N records. */
+export function readPersistedAudit(limit?: number): AuditRecord[] {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(auditFilePath(), "utf-8");
+  } catch {
+    return [];
+  }
+  const records: AuditRecord[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      records.push(JSON.parse(trimmed) as AuditRecord);
+    } catch {
+      // Skip a corrupt/partial line rather than failing the whole read.
+    }
+  }
+  if (typeof limit === "number" && limit >= 0 && records.length > limit) {
+    return records.slice(records.length - limit);
+  }
+  return records;
+}
+
 export function __testOnly_clearAudit(): void {
+  AUDIT.length = 0;
+  // Only remove the durable file when a test has pointed it at a scratch path,
+  // so the suite never deletes the operator's real `~/.vo` trail.
+  const override = process.env.VO_MCP_LOCAL_ACTION_AUDIT_PATH;
+  if (override && override.trim()) {
+    try {
+      fs.rmSync(override, { force: true });
+      fs.rmSync(`${override}.1`, { force: true });
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+/** Wipe ONLY the in-memory ring, leaving the durable file intact. Lets a test
+ *  simulate a process restart (ring gone, JSONL trail still on disk). */
+export function __testOnly_clearInMemoryAuditRing(): void {
   AUDIT.length = 0;
 }

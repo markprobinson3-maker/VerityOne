@@ -11,7 +11,7 @@
 
 import { Hono } from "hono";
 import { sql } from "../db";
-import { assertAgentSelfOrOperator, getAccessContext, isOperator, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
+import { allowedRegistryAccessLevels, assertAgentSelfOrOperator, getAccessContext, isOperator, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
 import { errorJson } from "../lib/error-envelope";
 import { validateRequest } from "../lib/zod-helpers";
 import { WatchCreateSchema, WatchDeleteSchema } from "../schemas/watch.schema";
@@ -85,6 +85,7 @@ watch.get("/:agentId", async (c) => {
   // Scope digest counts/samples to the caller's visible spaces so a watch
   // never surfaces another tenant's stimuli/nodes. Operator → null → all spaces.
   const watchSpaceIds = visibleSpaceIds(getAccessContext(c));
+  const watchAccessLevels = allowedRegistryAccessLevels(c);
   const watchTenant = resolveAgentTenant(c, agentId);
 
   const watches = await sql`
@@ -104,7 +105,7 @@ watch.get("/:agentId", async (c) => {
 
   const digest = [];
   for (const w of watches) {
-    const events = await resolveFilter(w.filter, w.last_checked, w.watch_priority, watchSpaceIds);
+    const events = await resolveFilter(w.filter, w.last_checked, w.watch_priority, watchSpaceIds, watchAccessLevels);
     digest.push({
       id: w.id,
       filter: w.filter,
@@ -170,8 +171,16 @@ watch.delete("/:id", async (c) => {
 });
 
 // Resolve a filter to events since last_checked
-async function resolveFilter(filter: string, since: Date, priority: string = "standard", spaceIds: string[] | null = null): Promise<{ count: number; sample: string | null }> {
+async function resolveFilter(filter: string, since: Date, priority: string = "standard", spaceIds: string[] | null = null, accessLevels: string[] = []): Promise<{ count: number; sample: string | null }> {
   const [prefix, value] = [filter.split(":")[0], filter.slice(filter.indexOf(":") + 1)];
+  // Global-public refinement (batch-31): for non-operators (spaceIds non-null,
+  // = ['global', 'tenant:<id>']) a bare `space_id = ANY(spaceIds)` lets GLOBAL-space
+  // private/dormant/merged nodes (and their stimuli content) leak into a tenant's
+  // digest counts/samples. Every other read path (search/context/briefing/
+  // visible-graph) adds: a global row is only visible if it is public AND its
+  // pyramid's access_level is allowed. Mirror that here, JOINing registry r and
+  // qualifying per the node alias of each query. Operator (spaceIds null) emits no
+  // clause → full visibility, exactly as before.
 
   switch (prefix) {
     case "domain": {
@@ -182,25 +191,29 @@ async function resolveFilter(filter: string, since: Date, priority: string = "st
         FROM stimuli s
         JOIN stimulus_contributions sc ON sc.stimulus_id = s.id AND sc.base_contribution > 0.001
         JOIN nodes n ON n.addr = sc.node_addr
+        ${spaceIds ? sql`JOIN registry r ON r.pyramid_id = n.pyramid_id` : sql``}
         WHERE s.created_at > ${since}
           AND n.visibility <> 'deleted'
-          ${spaceIds ? sql`AND s.space_id = ANY(${spaceIds}::text[])` : sql``}
+          ${spaceIds ? sql`AND s.space_id = ANY(${spaceIds}::text[])
+            AND (n.space_id <> 'global' OR (n.visibility = 'public' AND r.access_level = ANY(${accessLevels}::text[])))` : sql``}
           AND (n.label ILIKE ${pattern} OR n.substance::text ILIKE ${pattern})`;
       const trendLifecycles = priority === "critical"
         ? ["emerging", "active", "sustained", "cooling"]
         : ["active", "sustained", "cooling"];
       const [trendResult] = await sql`
-        SELECT COUNT(*)::int as n, MIN(label) as sample
-        FROM nodes
-        WHERE node_type = 'trend'
-          AND visibility <> 'deleted'
-          ${spaceIds ? sql`AND space_id = ANY(${spaceIds}::text[])` : sql``}
-          AND COALESCE(source_context->'trend'->>'lifecycle', 'emerging') = ANY(${trendLifecycles}::text[])
-          AND (label ILIKE ${pattern} OR substance::text ILIKE ${pattern})
+        SELECT COUNT(*)::int as n, MIN(n.label) as sample
+        FROM nodes n
+        ${spaceIds ? sql`JOIN registry r ON r.pyramid_id = n.pyramid_id` : sql``}
+        WHERE n.node_type = 'trend'
+          AND n.visibility <> 'deleted'
+          ${spaceIds ? sql`AND n.space_id = ANY(${spaceIds}::text[])
+            AND (n.space_id <> 'global' OR (n.visibility = 'public' AND r.access_level = ANY(${accessLevels}::text[])))` : sql``}
+          AND COALESCE(n.source_context->'trend'->>'lifecycle', 'emerging') = ANY(${trendLifecycles}::text[])
+          AND (n.label ILIKE ${pattern} OR n.substance::text ILIKE ${pattern})
           AND COALESCE(
-            (source_context->'trend'->>'last_stimulus_at')::timestamptz,
-            (source_context->'trend'->>'birth_time')::timestamptz,
-            created_at
+            (n.source_context->'trend'->>'last_stimulus_at')::timestamptz,
+            (n.source_context->'trend'->>'birth_time')::timestamptz,
+            n.created_at
           ) > ${since}`;
       return {
         count: parseInt(result.n) + parseInt(trendResult.n),
@@ -218,11 +231,13 @@ async function resolveFilter(filter: string, since: Date, priority: string = "st
         FROM stimulus_contributions sc
         JOIN stimuli s ON s.id = sc.stimulus_id
         JOIN nodes n ON n.addr = sc.node_addr
+        ${spaceIds ? sql`JOIN registry r ON r.pyramid_id = n.pyramid_id` : sql``}
         WHERE sc.node_addr = ${value}
           AND sc.created_at > ${since}
           AND sc.base_contribution > 0.001
           AND n.visibility <> 'deleted'
-          ${spaceIds ? sql`AND n.space_id = ANY(${spaceIds}::text[])` : sql``}`;
+          ${spaceIds ? sql`AND n.space_id = ANY(${spaceIds}::text[])
+            AND (n.space_id <> 'global' OR (n.visibility = 'public' AND r.access_level = ANY(${accessLevels}::text[])))` : sql``}`;
       return { count: result.n, sample: result.sample ? result.sample.slice(0, 120) : null };
     }
     case "heat": {
@@ -230,17 +245,25 @@ async function resolveFilter(filter: string, since: Date, priority: string = "st
       const threshold = parseFloat(value.replace(">", "")) || 0.05;
       const [result] = await sql`
         SELECT COUNT(*)::int as n FROM nodes
+        ${spaceIds ? sql`JOIN registry r ON r.pyramid_id = nodes.pyramid_id` : sql``}
         WHERE stimulus_heat > ${threshold}
           AND visibility <> 'deleted'
-          ${spaceIds ? sql`AND space_id = ANY(${spaceIds}::text[])` : sql``}`;
+          ${spaceIds ? sql`AND nodes.space_id = ANY(${spaceIds}::text[])
+            AND (nodes.space_id <> 'global' OR (nodes.visibility = 'public' AND r.access_level = ANY(${accessLevels}::text[])))` : sql``}`;
       return { count: result.n, sample: result.n > 0 ? `${result.n} nodes above ${threshold} heat threshold` : null };
     }
     case "source": {
-      // Count stimuli from this source since last check
+      // Count stimuli from this source since last check. A GLOBAL-space stimulus is
+      // only visible to a tenant caller if it links to a global PUBLIC node (mirrors
+      // briefing.ts); the LEFT JOINs are only added for non-operators.
       const [result] = await sql`
-        SELECT COUNT(*)::int as n, MIN(content) as sample
-        FROM stimuli WHERE source = ${value} AND created_at > ${since}
-          ${spaceIds ? sql`AND space_id = ANY(${spaceIds}::text[])` : sql``}`;
+        SELECT COUNT(*)::int as n, MIN(s.content) as sample
+        FROM stimuli s
+        ${spaceIds ? sql`LEFT JOIN nodes n ON n.addr = s.node_addr
+        LEFT JOIN registry r ON r.pyramid_id = n.pyramid_id` : sql``}
+        WHERE s.source = ${value} AND s.created_at > ${since}
+          ${spaceIds ? sql`AND s.space_id = ANY(${spaceIds}::text[])
+            AND (s.space_id <> 'global' OR (n.addr IS NOT NULL AND n.space_id = 'global' AND n.visibility = 'public' AND r.access_level = ANY(${accessLevels}::text[])))` : sql``}`;
       return { count: result.n, sample: result.sample ? result.sample.slice(0, 120) : null };
     }
     default:

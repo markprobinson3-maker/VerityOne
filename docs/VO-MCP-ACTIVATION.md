@@ -1,5 +1,11 @@
 # VO MCP — Activation Wayfinding
 
+> **Operator-only commands ahead.** This doc references the full operator `vo` CLI
+> (`vo mcp onboard`, `vo mcp-proof`) and the private `agent-lab/` proof scripts, which are
+> **not part of the OSS source install**. Public installs ship only the `vo-mcp` stdio
+> binary (`vo-mcp install` / `vo-mcp doctor`) — use those; the operator commands here are
+> for the full/private tree.
+
 > **Scope:** one practical doc for operators (and for agents
 > running under operator supervision) that answers "what do I
 > run, in what order, and what does each proof mean?" to take
@@ -315,27 +321,27 @@ not `pass`.
 
 ## Related docs
 
-- **`VO-MCP-STANDARDIZATION-PROOF-PR-LADDER`** —
+- **`docs/VO-MCP-STANDARDIZATION-PROOF-PR-LADDER.md`** —
   cross-document proof ladder for keeping MCP status language,
   action-runner authority, Skill/MCP separation, local-vs-hosted
   transport wording, and vault boundaries consistent. This ladder
   does not replace `vo mcp-proof --local`; it standardizes the
   surrounding operator story without adding remote/web MCP claims
   or new local mutation authority.
-- **`VO-HOSTED-WEB-MCP-BOUNDARY-PROOF-PR-LADDER`** —
+- **`docs/VO-HOSTED-WEB-MCP-BOUNDARY-PROOF-PR-LADDER.md`** —
   follow-on proof ladder for the hosted/web MCP boundary debt left
   explicit by standardization closure: `/hosted-mcp/*` as hosted
   portable-agent REST, hosted/serverless `POST /mcp` as the web MCP
   connector, `mcp.verityone.app` as not shipped, `/my` outside local
   action-runner authority, and vault authority unchanged.
-- **`VO-HOSTED-WEB-MCP-IMPLEMENTATION-READINESS-PR-LADDER`** —
+- **`docs/VO-HOSTED-WEB-MCP-IMPLEMENTATION-READINESS-PR-LADDER.md`** —
   follow-on implementation-readiness ladder for the future hosted/web MCP
   shipping path. It does not ship `mcp.verityone.app`; it pins the DNS, TLS,
   protected-resource metadata, OAuth audience, connector runtime,
   queue-only write-intent, local-action negative, vault negative, redaction,
   and sibling-ladder gates. Until those gates pass, no hosted/web MCP
   availability claim is shipped.
-- **`VO-HOSTED-WEB-MCP-SHIPPING-PR-LADDER`** —
+- **`docs/VO-HOSTED-WEB-MCP-SHIPPING-PR-LADDER.md`** —
   implementation ladder that begins the actual hosted/web MCP shipping track.
   Slice 10 closure attestation landed: the tenant-facing rollup reports `pass`
   across all twelve Shipped Claim Gate cells and the live-protocol cell reports
@@ -371,7 +377,7 @@ not `pass`.
   Read this design before any future PR adds a new dashboard
   control, changes the shipped Skill checker, or moves the
   status model.
-- **`VO-MCP-LOCAL-ACTION-RUNNER-DESIGN`** — authoritative
+- **`docs/VO-MCP-LOCAL-ACTION-RUNNER-DESIGN.md`** — authoritative
   contract for the local `/dashboard` action runner. **Runtime
   runner exists today** (read-only doctors; Claude Desktop MCP
   file_mutation install / force / rollback; Codex MCP
@@ -393,7 +399,7 @@ not `pass`.
   schema, preview / confirm / execute lifecycle,
   backup-before-write, path-safety fence, secret redaction, and
   mutation-lock semantics every future runner PR must honor.
-- **`VO-MCP-CODEX-TOML-MERGE-DESIGN`** — binding
+- **`docs/VO-MCP-CODEX-TOML-MERGE-DESIGN.md`** — binding
   contract for the Codex MCP config auto-merge dashboard
   action. The three action IDs (`mcp_onboard_codex`,
   `mcp_onboard_codex_force`, `mcp_rollback_codex`)
@@ -411,7 +417,7 @@ not `pass`.
 - **`docs/VO-MCP-AGENT-USAGE.md`** — full agent usage kit:
   decision tree, handling semantics, per-client setup
   deltas.
-- **`VO-MCP-CROSS-CLIENT-INTEROP-PROOF`** — proof
+- **`docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md`** — proof
   runner contract, per-axis evidence model, artifact
   schemas.
 - **`docs/VO-MCP-SERVER-CONTRACT.md`** — binding per-rung

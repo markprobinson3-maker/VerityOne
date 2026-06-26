@@ -560,7 +560,11 @@ async function main() {
   await sql.end();
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+// Only run the CLI when executed directly (`bun run ingestor.ts ...`), not when imported
+// as a module (e.g. by tests) — importing must not connect to the DB or parse argv.
+if (import.meta.main) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}
 
 // ==========================================================
 // GITHUB SCAN — Ingest a curated list of repos
@@ -602,7 +606,7 @@ async function scanGitHub(repos: string[] = CURATED_REPOS): Promise<void> {
 // CLI ADAPTER — Mine installed CLIs via --help
 // ==========================================================
 
-import { execSync } from "child_process";
+import { spawnSync } from "node:child_process";
 
 interface CLISource {
   name: string;
@@ -612,37 +616,51 @@ interface CLISource {
   subcommands?: string[];
 }
 
-function discoverCLIs(): CLISource[] {
-  // Curated list of CLIs we know are valuable for agents
-  const clis = [
-    // OpenClaw ecosystem
-    "openclaw", "memo", "remindctl", "imsg", "clawhub",
-    // Development
-    "claude", "codex", "gh", "bun", "node", "vercel", "psql",
-    // Media
-    "ffmpeg", "sips",
-    // Utilities  
-    "jq", "trash", "curl",
-  ];
+// Curated list of CLIs we know are valuable for agents.
+const DEFAULT_CLI_PROBES = [
+  // OpenClaw ecosystem
+  "openclaw", "memo", "remindctl", "imsg", "clawhub",
+  // Development
+  "claude", "codex", "gh", "bun", "node", "vercel", "psql",
+  // Media
+  "ffmpeg", "sips",
+  // Utilities
+  "jq", "trash", "curl",
+];
 
+export function discoverCLIs(clis: string[] = DEFAULT_CLI_PROBES): CLISource[] {
   const results: CLISource[] = [];
   
   for (const cmd of clis) {
     try {
-      const path = execSync(`which ${cmd} 2>/dev/null`, { encoding: "utf-8" }).trim();
-      if (!path) continue;
-      
-      let helpText = "";
-      try {
-        helpText = execSync(`${cmd} --help 2>&1`, { encoding: "utf-8", timeout: 5000 }).slice(0, 5000);
-      } catch (e: any) {
-        helpText = e.stdout?.slice(0, 5000) || e.stderr?.slice(0, 5000) || "";
-      }
-      
+      // Resolve the command via the which(1) binary with a literal argv (no shell),
+      // so a hostile PATH/shell-metachar can't be interpolated into a command string.
+      const whichResult = spawnSync("which", [cmd], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 2000,
+      });
+      const path = (whichResult.stdout || "").trim().split("\n")[0]?.trim() || "";
+      if (whichResult.status !== 0 || !path) continue;
+
+      // Probe --help / --version with argv arrays (no shell). spawnSync does NOT throw on
+      // non-zero exit; it returns status + captured stdio, and the tools often print help
+      // to stderr, so fall back to stderr.
+      const helpResult = spawnSync(cmd, ["--help"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5000,
+      });
+      const helpText = ((helpResult.stdout || "") + (helpResult.stderr || "")).slice(0, 5000);
+
       let version: string | undefined;
-      try {
-        version = execSync(`${cmd} --version 2>&1`, { encoding: "utf-8", timeout: 3000 }).trim().split("\n")[0];
-      } catch {}
+      const versionResult = spawnSync(cmd, ["--version"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 3000,
+      });
+      const versionOut = ((versionResult.stdout || "") + (versionResult.stderr || "")).trim();
+      if (versionOut) version = versionOut.split("\n")[0];
 
       // Try to discover subcommands from help text
       const subcommands = helpText.match(/^\s{2,}(\w[\w-]+)\s/gm)

@@ -410,10 +410,11 @@ agenda.get("/", async (c) => {
   // --- MAINTENANCE SIGNALS: actionable graph health items for agents ---
   const maintenanceItems: any[] = [];
 
-  // Pending proposals awaiting review
+  // Pending proposals awaiting review. Global queue depth is an operator-only
+  // maintenance signal — beta callers must not see cross-tenant graph health.
   const [pendingProposals] = await sql`
     SELECT count(*)::int AS cnt FROM proposals WHERE status = 'pending'`;
-  if (pendingProposals.cnt > 10) {
+  if (access.scope === "operator" && pendingProposals.cnt > 10) {
     maintenanceItems.push({
       type: "pending_proposals",
       count: pendingProposals.cnt,
@@ -493,7 +494,7 @@ agenda.get("/", async (c) => {
   // Pending supersessions
   const [pendingSupersessions] = await sql`
     SELECT count(*)::int AS cnt FROM supersession_candidates WHERE status = 'pending'`;
-  if (pendingSupersessions.cnt > 50) {
+  if (access.scope === "operator" && pendingSupersessions.cnt > 50) {
     maintenanceItems.push({
       type: "supersession_backlog",
       count: pendingSupersessions.cnt,
@@ -505,7 +506,7 @@ agenda.get("/", async (c) => {
   // Unembedded nodes (invisible to semantic search)
   const [unembedded] = await sql`
     SELECT count(*)::int AS cnt FROM nodes WHERE visibility = 'public' AND embedding_hv IS NULL`;
-  if (unembedded.cnt > 0) {
+  if (access.scope === "operator" && unembedded.cnt > 0) {
     maintenanceItems.push({
       type: "unembedded_nodes",
       count: unembedded.cnt,
@@ -520,14 +521,16 @@ agenda.get("/", async (c) => {
     LEFT JOIN edges e ON e.from_addr = n.addr OR e.to_addr = n.addr
     WHERE n.visibility = 'public' AND n.layer > 0 AND e.id IS NULL AND n.query_hits > 0
     ORDER BY n.query_hits DESC LIMIT 3`;
-  for (const o of orphanValuable) {
-    maintenanceItems.push({
-      type: "valuable_orphan",
-      addr: o.addr,
-      label: o.label,
-      query_hits: o.query_hits,
-      action: `Wire ${o.addr} to related nodes — it has ${o.query_hits} query hits but no edges`,
-    });
+  if (access.scope === "operator") {
+    for (const o of orphanValuable) {
+      maintenanceItems.push({
+        type: "valuable_orphan",
+        addr: o.addr,
+        label: o.label,
+        query_hits: o.query_hits,
+        action: `Wire ${o.addr} to related nodes — it has ${o.query_hits} query hits but no edges`,
+      });
+    }
   }
 
   const result: any = {

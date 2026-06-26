@@ -75,6 +75,15 @@ function readRecords(): BrowserCaptureTokenRecord[] {
   }
 }
 
+// SINGLE-WRITER INVARIANT (batch-21 P2): the read-mutate-write mutators in this module
+// (mint / revoke / resolve's last_used_at touch) are not mutually locked, so a concurrent
+// revoke + capture could last-writer-win and resurrect a stale "active" record. This is
+// safe ONLY because the browser-capture token store is owned by the SINGLE long-lived
+// local node process — the local-control routes that touch it are 503'd on serverless
+// (api/index.ts LONG_LIVED_PREFIX_RE), and these mutators run synchronously within that
+// one process, so there is never a second concurrent writer. If that ever changes (a
+// worker thread / second process), add an advisory file lock or move the store to the DB
+// before relying on it for revocation.
 function writeRecords(records: BrowserCaptureTokenRecord[]): void {
   fs.mkdirSync(configDir(), { recursive: true });
   const target = browserCaptureTokenStorePath();

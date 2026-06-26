@@ -319,7 +319,7 @@ async function runChallengers(
       const sqlOut = extractSQL(raw, runId);
       return { role: "challenger" as AgentRole, perspective: `challenger-${i}`, sql: sqlOut, raw };
     } catch (e: any) {
-      console.error(`  governance-role ${i} failed: ${e.message}`);
+      console.error(`  Challenger ${i} failed: ${e.message}`);
       return { role: "challenger" as AgentRole, perspective: `challenger-${i}`, sql: "", raw: e.message };
     }
   });
@@ -395,6 +395,91 @@ function extractSQL(raw: string, runId: string): string {
 }
 
 // --- Staging Write ---
+/**
+ * Allowlist gate for an LLM-emitted staging INSERT before it reaches sql.unsafe().
+ * The previous gate only checked that a statement STARTS with "INSERT INTO staging_…",
+ * which let `INSERT INTO staging_nodes (...) VALUES (...); DROP TABLE nodes; --` and
+ * `INSERT INTO staging_nodes SELECT ...` through. This is a string-literal-aware scanner:
+ * it tracks single-quoted literals (Postgres `''` escaping) so JSON substance values may
+ * freely contain `;`, `--`, or SQL keywords, and OUTSIDE literals it forbids statement
+ * separators, comments, a second statement, and any non-INSERT/VALUES SQL keyword. Only a
+ * single, well-formed `INSERT INTO staging_(nodes|edges|updates) (...) VALUES (...)` passes.
+ *
+ * (The fuller migration — model emits structured JSON proposals, we emit parameterized
+ * inserts — is the preferred end state but requires reworking the swarm's inter-agent SQL
+ * handoff and validating against the live multi-agent run; tracked as a follow-up.)
+ */
+export function isSafeStagingInsert(rawStmt: string): boolean {
+  const stmt = rawStmt.trim().replace(/;+\s*$/, ""); // tolerate trailing semicolon(s)
+  if (!stmt) return false;
+  if (!/^INSERT\s+INTO\s+staging_(nodes|edges|updates)\b/i.test(stmt)) return false;
+
+  // Collect everything OUTSIDE single-quoted string literals (lowercased).
+  let inStr = false;
+  let outside = "";
+  for (let i = 0; i < stmt.length; i++) {
+    const ch = stmt[i];
+    if (inStr) {
+      if (ch === "'") {
+        if (stmt[i + 1] === "'") { i++; continue; } // '' = escaped quote, stay in string
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") { inStr = true; continue; }
+    outside += ch.toLowerCase();
+  }
+  if (inStr) return false; // unterminated string literal → malformed/suspicious
+
+  if (outside.includes(";")) return false;                        // stacked statements
+  if (outside.includes("--") || outside.includes("/*") || outside.includes("*/")) return false; // comments
+  // Exactly one INSERT, a VALUES clause, and no non-INSERT SQL verbs outside literals.
+  if ((outside.match(/\binsert\s+into\b/g) || []).length !== 1) return false;
+  if (!/\bvalues\b/.test(outside)) return false;
+  if (/\b(select|drop|delete|update|alter|truncate|create|grant|revoke|copy|merge|call|do|attach|set|returning|union|with)\b/.test(outside)) return false;
+
+  // Block function-call expressions (e.g. `VALUES (pg_sleep(30))`), which pass
+  // every keyword check above. Legit staging inserts use only literals and
+  // casts (`'…'::jsonb`); the ONLY legitimate `identifier(` tokens are the
+  // table name, its column-list opener, and VALUES. Any other identifier
+  // immediately followed by `(` is a function call and is rejected.
+  const ALLOWED_PARENS = new Set(["values", "staging_nodes", "staging_edges", "staging_updates"]);
+  for (const m of outside.matchAll(/\b([a-z_][a-z0-9_]*)\s*\(/g)) {
+    if (!ALLOWED_PARENS.has(m[1])) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Split a batch of LLM-emitted SQL into statements on semicolons that are
+ * OUTSIDE single-quoted string literals (Postgres `''` escaping). A raw
+ * `allSQL.split(";")` would split a valid INSERT whose JSON/text value contains
+ * a `;`, corrupting it into bad fragments. Mirrors the literal tracking in
+ * isSafeStagingInsert.
+ */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inStr = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (inStr) {
+      cur += ch;
+      if (ch === "'") {
+        if (sql[i + 1] === "'") { cur += "'"; i++; continue; } // '' escaped quote
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") { inStr = true; cur += ch; continue; }
+    if (ch === ";") { out.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out;
+}
+
 async function writeToStaging(allSQL: string, runId: string, dryRun: boolean): Promise<{ nodes: number; edges: number; updates: number }> {
   if (!allSQL.trim()) return { nodes: 0, edges: 0, updates: 0 };
   
@@ -409,7 +494,7 @@ async function writeToStaging(allSQL: string, runId: string, dryRun: boolean): P
   }
 
   // Execute SQL statements one at a time for safety.
-  const statements = allSQL.split(";").filter(s => s.trim().toUpperCase().startsWith("INSERT INTO STAGING_"));
+  const statements = splitSqlStatements(allSQL).filter(s => s.trim().toUpperCase().startsWith("INSERT INTO STAGING_"));
   let successNodes = 0, successEdges = 0, successUpdates = 0;
 
   // Track address remapping: LLM-generated addr → safe addr
@@ -426,6 +511,10 @@ async function writeToStaging(allSQL: string, runId: string, dryRun: boolean): P
   // even though the source is LLM-emitted SQL.
   for (const stmt of nodeStatements) {
     let trimmed = stmt.trim();
+    if (!isSafeStagingInsert(trimmed)) {
+      console.warn(`  ↳ Blocked unsafe staged node SQL: ${trimmed.slice(0, 60)}`);
+      continue;
+    }
     const addrMatch = trimmed.match(/VALUES\s*\(\s*'[^']+'\s*,\s*'([^']+)'/i);
     const pyramidMatch = trimmed.match(/VALUES\s*\(\s*'[^']+'\s*,\s*'[^']+'\s*,\s*'([^']+)'/i);
     if (addrMatch && pyramidMatch) {
@@ -480,9 +569,11 @@ async function writeToStaging(allSQL: string, runId: string, dryRun: boolean): P
       }
     }
     
-    // Safety gate: only allow INSERT INTO staging_nodes/staging_edges/staging_updates
-    if (!/^\s*INSERT\s+INTO\s+staging_(nodes|edges|updates)\s/i.test(trimmed)) {
-      console.warn(`  ↳ Blocked non-staging SQL: ${trimmed.slice(0, 60)}`);
+    // Allowlist gate: a single well-formed INSERT INTO staging_(nodes|edges|updates) only —
+    // rejects stacked statements, comments, INSERT…SELECT, and non-INSERT verbs (string-
+    // literal-aware, so JSON substance values are unaffected).
+    if (!isSafeStagingInsert(trimmed)) {
+      console.warn(`  ↳ Blocked unsafe staging SQL: ${trimmed.slice(0, 60)}`);
       continue;
     }
     try {
@@ -612,7 +703,11 @@ async function main() {
   await sql.end();
 }
 
-main().catch((e) => {
-  console.error("Fatal:", e);
-  process.exit(1);
-});
+// Only run the CLI when executed directly, not when imported (e.g. by tests) — importing
+// must not connect to the DB or convene a swarm.
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Fatal:", e);
+    process.exit(1);
+  });
+}

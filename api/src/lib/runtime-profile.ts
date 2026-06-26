@@ -72,6 +72,72 @@ function configPath(): string {
   return resolveConfigPath();
 }
 
+/**
+ * Atomically rewrite ~/.vo/config.json OWNER-ONLY (mode 0600). Canonical writer for
+ * the secret-bearing config — it holds the agent bearer token, and bootstrap-local.sh
+ * creates it 0600 on purpose. A temp-file+rename writer that omits the mode produces a
+ * 0644 temp on a 022 umask, and the rename then makes the bearer-bearing config
+ * WORLD-READABLE (batch-20 R1 / batch-22). EVERY config.json writer (writeTenantSetting,
+ * writeSyncProjects, sync-preferences.writeRawConfig, sync-exporter) must go through a
+ * 0600 writer. Force the mode on the temp before the rename (writeFileSync's mode is
+ * umask-masked, so chmod explicitly) and re-assert it on the destination.
+ */
+export function writeLocalConfigAtomic0600(cfgPath: string, raw: unknown): void {
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  const tmp = `${cfgPath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, JSON.stringify(raw, null, 2), { mode: 0o600 });
+  fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, cfgPath);
+  try { fs.chmodSync(cfgPath, 0o600); } catch { /* best-effort re-assert */ }
+}
+
+// ── Hosted-origin trust (batch-25 #2) ───────────────────────────────────
+// Shared by the dashboard AND the `vo` CLI so both apply the SAME allowlist
+// before sending token-bearing calls (link codes, session cookies, sync/agent
+// credentials) to a hosted base URL. Without this, a raw --hosted-url /
+// VOPLUS_API_URL (or a tampered dashboard body) could redirect this tenant's
+// bearer tokens to an attacker origin.
+
+export const DEFAULT_HOSTED_ORIGIN = "https://verityone.app";
+
+/** Origins this node may point token-bearing calls at: verityone.app plus any
+ *  in VERITY_EXTRA_HOSTED_ORIGINS (comma-separated, trailing-slash trimmed).
+ *  Loopback is always allowed for local test/dev (handled by the normalizer). */
+export function allowedHostedOrigins(): Set<string> {
+  const set = new Set<string>([DEFAULT_HOSTED_ORIGIN]);
+  for (const raw of (process.env.VERITY_EXTRA_HOSTED_ORIGINS || "").split(",")) {
+    const o = raw.trim();
+    if (o) set.add(o.replace(/\/+$/, ""));
+  }
+  return set;
+}
+
+/** Validate + normalize a hosted base URL before token-bearing calls go to it:
+ *  https-only (except loopback), origin must be allow-listed, trailing
+ *  slash/query/hash stripped. Empty input falls back to the default origin.
+ *  Throws on rejection (invalid URL, non-https non-loopback, or disallowed
+ *  origin) — callers surface a clean error. */
+export function normalizeAllowedHostedBaseUrl(raw: string | null | undefined): string {
+  const input = (raw ?? "").trim() || DEFAULT_HOSTED_ORIGIN;
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    throw new Error("hosted base URL is not a valid URL");
+  }
+  const isLoopback = url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "localhost";
+  if (url.protocol !== "https:" && !isLoopback) {
+    throw new Error("hosted base URL must use https");
+  }
+  if (!isLoopback && !allowedHostedOrigins().has(url.origin)) {
+    throw new Error("hosted base URL origin is not in the allowed list");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 function isValidProfile(value: unknown): value is RuntimeProfile {
   return typeof value === "string" && (VALID_PROFILES as readonly string[]).includes(value);
 }
@@ -508,10 +574,8 @@ export function writeTenantSetting(
   const previous = existing[key] ?? null;
   existing[key] = value;
 
-  // Atomic write
-  const tmp = `${cfgPath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(existing, null, 2));
-  fs.renameSync(tmp, cfgPath);
+  // Atomic 0600 write — config.json carries the agent token; never downgrade it.
+  writeLocalConfigAtomic0600(cfgPath, existing);
 
   // Sync journal: governance upsert for machine settings change.
   // Optional — callers without DB access skip this; the exporter's
@@ -552,9 +616,8 @@ export function writeSyncProjects(
   const previous = existing.sync_projects ?? null;
   existing.sync_projects = addrs;
 
-  const tmp = `${cfgPath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(existing, null, 2));
-  fs.renameSync(tmp, cfgPath);
+  // Atomic 0600 write — config.json carries the agent token; never downgrade it.
+  writeLocalConfigAtomic0600(cfgPath, existing);
 
   // Sync journal: governance upsert for sync_projects change
   if (options?.sql && options?.tenantId) {

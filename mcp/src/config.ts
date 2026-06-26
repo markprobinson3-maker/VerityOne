@@ -37,10 +37,14 @@ function loadSecretsEnv(): void {
   for (const raw of content.split("\n")) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
+    // Tolerate a leading `export ` (a hand-edited secrets.env that someone
+    // tried to `source`): without this, the key becomes "export VO_TOKEN" and
+    // the real token is never applied → a spurious no_token failure. (batch-31)
+    const body = line.startsWith("export ") ? line.slice(7).trimStart() : line;
+    const eq = body.indexOf("=");
     if (eq < 1) continue;
-    const key = line.slice(0, eq).trim();
-    const val = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    const key = body.slice(0, eq).trim();
+    const val = body.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
     if (!process.env[key]) process.env[key] = val;
   }
 }

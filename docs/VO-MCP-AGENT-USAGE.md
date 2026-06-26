@@ -1,5 +1,11 @@
 # VO MCP — Agent Usage Kit
 
+> **Operator-only commands ahead.** This doc references the full operator `vo` CLI
+> (`vo mcp onboard`, `vo mcp-proof`) and the private `agent-lab/` proof scripts, which are
+> **not part of the OSS source install**. Public installs ship only the `vo-mcp` stdio
+> binary (`vo-mcp install` / `vo-mcp doctor`) — use those; the operator commands here are
+> for the full/private tree.
+
 > **Originating PR:** `VO-MCP-AGENT-USAGE-SKILL-PR-1` introduced this
 > markdown guide. A matching repo-local Skill-format artifact ships
 > separately in `VO-MCP-SKILL-PACKAGING-PR-1` at
@@ -399,5 +405,5 @@ above.
 
 For the per-rung contract, see
 `docs/VO-MCP-SERVER-CONTRACT.md`. For the cross-client proof
-matrix, see `VO-MCP-CROSS-CLIENT-INTEROP-PROOF`. For the
+matrix, see `docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md`. For the
 package-level overview, see `mcp/README.md`.

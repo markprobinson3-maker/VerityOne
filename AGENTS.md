@@ -70,7 +70,7 @@ GET http://localhost:3100/nodes/:addr       — single node + neighbors
 GET http://localhost:3100/subgraph?pyramid=META&depth=0-3  — slice
 GET http://localhost:3100/search?q=concept  — semantic search (needs embeddings)
 GET http://localhost:3100/traverse?from=META.0.2.4&hops=2  — graph walk
-WS  ws://localhost:3100/stream             — real-time changes
+WS  ws://localhost:3100/stream             — real-time changes (operator token required)
 ```
 
 ### Essential Queries
@@ -111,10 +111,10 @@ WHERE label ILIKE '%dialectic%'
 
 **Semantic search (when embeddings are live):**
 ```sql
-SELECT addr, label, 1 - (embedding <=> $query_embedding) as similarity
+SELECT addr, label, 1 - (embedding_hv <=> $query_embedding) as similarity
 FROM nodes
-WHERE embedding IS NOT NULL
-ORDER BY embedding <=> $query_embedding
+WHERE embedding_hv IS NOT NULL
+ORDER BY embedding_hv <=> $query_embedding
 LIMIT 10;
 ```
 
@@ -157,7 +157,7 @@ Addresses are **primary keys** — the identity IS the address.
 | label | text | Human-readable name |
 | substance | jsonb | **ALL knowledge lives here.** Must be self-sufficient — no external dependencies. Contains description, details, specifications, everything needed to understand AND reconstruct what this node represents. |
 | confidence | float | 0.0–1.0. Single agent max 0.7. 0.9+ needs 2+ agent tiers. 0.95+ needs human. |
-| embedding | vector(768) | Google text-embedding-004. For semantic search. |
+| embedding_hv | halfvec(3072) | Google gemini-embedding-001. For semantic search (HNSW). |
 | hash | text | Merkle hash (pending until computed) |
 | provenance | jsonb | Audit trail: who created it, from what source, when |
 | parent_addr | text FK | Parent node (tree structure) |
@@ -246,15 +246,14 @@ As of 2026-03-14:
 - **309 total nodes**, 173 edges (157 L1, 16 L2)
 - **197 public** / 112 private nodes
 - Depths 0–9 in META, 0–3 in others
-- Embeddings: **LIVE** — all 309 nodes embedded, IVFFlat index active, semantic search working
+- Embeddings: **LIVE** — nodes embedded into `embedding_hv halfvec(3072)`, HNSW index active, semantic search working
 
 ## Architecture
 
 - **Database:** PostgreSQL 17 + pgvector 0.8.2, localhost:5432, database `verity`
-- **API:** Bun + Hono on port 3100 (bound 0.0.0.0)
-- **Visualization:** Verity Scope (Three.js 3D) on port 3101
-- **Real-time:** pg_notify → WebSocket → Scope
-- **Embeddings:** Google gemini-embedding-001 (768 dimensions, outputDimensionality=768)
+- **API:** Bun + Hono on port 3100 (binds 127.0.0.1 by default; set VERITY_API_BIND to change, e.g. 0.0.0.0 for LAN) — your local node, the authoritative store
+- **Agent transport:** the local stdio MCP server (`vo-mcp`) is the primary way agents reach the node; the HTTP API above is the same node's REST surface. The hosted `verityone.app` mirror is an optional, derived read mirror — keep durable truth in your local node.
+- **Embeddings:** Google gemini-embedding-001 (3072 dimensions, stored as `embedding_hv halfvec(3072)`, HNSW cosine index)
 
 ## Philosophy
 

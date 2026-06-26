@@ -15,7 +15,7 @@ import { Hono } from "hono";
 import { sql } from "../db";
 import { allowedRegistryAccessLevels, getAccessContext, visibleSpaceIds } from "../lib/access";
 import { GLOBAL_SPACE_ID } from "../lib/spaces";
-import { clampInt } from "../lib/utils";
+import { clampInt, MAX_OFFSET } from "../lib/utils";
 import { errorJson } from "../lib/error-envelope";
 
 const capabilities = new Hono();
@@ -38,7 +38,18 @@ capabilities.get("/", async (c) => {
   const type = c.req.query("type"); // tool, skill, workflow
   const q = c.req.query("q"); // text filter on capability name
   const limit = clampInt(c.req.query("limit"), 100, 1, 500);
-  const offset = clampInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+  const offset = clampInt(c.req.query("offset"), 0, 0, MAX_OFFSET);
+
+  // `type` was previously read and silently ignored (batch-30): callers asking
+  // for ?type=tool got the unfiltered list. Validate against the known set and
+  // build a parameterized fragment applied to the provider-resolving subqueries
+  // (results + filtered count), mirroring how `domain`/`q` narrow the result
+  // set without touching the global totals.
+  const ALLOWED_CAP_TYPES = ["tool", "skill", "workflow"];
+  if (type && !ALLOWED_CAP_TYPES.includes(type)) {
+    return errorJson(c, "invalid_request", { message: `Unsupported type. Use one of: ${ALLOWED_CAP_TYPES.join(", ")}` });
+  }
+  const typeFilter = type ? sql`AND n.node_type = ${type}` : sql``;
 
   // Build WHERE clause pieces — domain filter needs different qualifiers per query
   const whereQ = q ? sql`cap ILIKE ${'%' + q + '%'}` : sql`true`;
@@ -69,6 +80,7 @@ capabilities.get("/", async (c) => {
             WHERE r.access_level = ANY(${accessLevels}::text[])
               AND n.visibility = 'public'
               ${nodeScope}
+              ${typeFilter}
           ) visible_domains
         ), '[]'::jsonb) AS domains
       FROM (
@@ -79,6 +91,7 @@ capabilities.get("/", async (c) => {
         WHERE r.access_level = ANY(${accessLevels}::text[])
           AND n.visibility = 'public'
           ${nodeScope}
+          ${typeFilter}
       ) vp
     ) visible
     WHERE ${whereAll}
@@ -95,6 +108,7 @@ capabilities.get("/", async (c) => {
       AND n.visibility = 'public'
       AND r.access_level = ANY(${accessLevels}::text[])
       ${nodeScope}
+      ${typeFilter}
   )` : sql`true`;
   const [filtered] = await sql`
     SELECT COUNT(*) AS cnt
@@ -108,6 +122,7 @@ capabilities.get("/", async (c) => {
         WHERE r.access_level = ANY(${accessLevels}::text[])
           AND n.visibility = 'public'
           ${nodeScope}
+          ${typeFilter}
       )`;
   const filteredTotal = parseInt(filtered.cnt);
 
@@ -163,7 +178,7 @@ capabilities.get("/", async (c) => {
       filtered_total: filteredTotal,
       has_more: offset + results.length < filteredTotal,
       next: offset + results.length < filteredTotal
-        ? `/capabilities?${domain ? `domain=${domain}&` : ''}${q ? `q=${q}&` : ''}limit=${limit}&offset=${offset + limit}`
+        ? `/capabilities?${domain ? `domain=${domain}&` : ''}${type ? `type=${type}&` : ''}${q ? `q=${q}&` : ''}limit=${limit}&offset=${offset + limit}`
         : null,
     },
     drill: {

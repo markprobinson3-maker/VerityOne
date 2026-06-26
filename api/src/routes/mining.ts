@@ -36,7 +36,11 @@ mining.get("/runs", async (c) => {
   return c.json({ runs });
 });
 
-// POST /mining/swarm-fill - Trigger a swarm fill run
+// POST /mining/swarm-fill - Prepare the swarm-fill command (does NOT run it).
+// Swarm-fill is a long-running multi-agent subprocess unsuitable for an HTTP
+// request lifecycle, so this endpoint validates+audits the request and returns
+// the exact command for the operator (or a scheduler such as
+// scripts/swarm-fill-cron.sh) to execute. It is a command preview, not a runner.
 mining.post("/swarm-fill", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const pyramid = body.pyramid || null;
@@ -44,7 +48,7 @@ mining.post("/swarm-fill", async (c) => {
   const agents = body.agents || 16;
   const dryRun = body.dryRun || false;
 
-  // Run swarm-fill as subprocess
+  // Build the swarm-fill subprocess command for the operator to run.
   const args = ["run", "../miners/src/swarm-fill.ts"];
   if (pyramid) args.push("--pyramid", pyramid);
   if (addr) args.push("--addr", addr);
@@ -56,14 +60,15 @@ mining.post("/swarm-fill", async (c) => {
     tenantId: process.env.VERITY_DEFAULT_TENANT_ID || "system",
     actor: "operator",
     actorKind: "operator_token",
-    operation: "mining_swarm_fill",
+    operation: "mining_swarm_fill_prepare",
     eventData: { pyramid, addr, agents, dry_run: dryRun },
   });
 
   return c.json({
-    message: "Swarm fill triggered",
+    executed: false,
+    message: "Swarm fill command prepared — not executed. Run it to start the fill.",
     command: `bun ${args.join(" ")}`,
-    note: "Run from api/ directory. Results go to staging tables for QC."
+    note: "Run from api/ directory (or via scripts/swarm-fill-cron.sh). Results go to staging tables for QC."
   });
 });
 

@@ -50,11 +50,27 @@ export interface WriteMemoryParams {
   remoteRequestId?: string;
   /** F9: per-request correlation id; threaded into memory_events. */
   correlationId?: string | null;
+  /**
+   * dedup-lock: optional in-lock dedup re-check. When provided, writeMemory runs
+   * this dedup query INSIDE the advisory lock and, if a duplicate already exists,
+   * returns { deduplicated: true, addr: <existing> } WITHOUT inserting — closing
+   * the race where two concurrent identical writes both pass the caller's
+   * pre-lock dedup before either inserts. Omit when the caller does not dedupe.
+   */
+  dedupGuard?: {
+    queryVecStr: string;
+    threshold: number;
+    projectAddr: string;
+  };
 }
 
 export interface WriteResult {
   ok: boolean;
   addr: string;
+  /** dedup-lock: set when the in-lock recheck collapsed onto an existing node. */
+  deduplicated?: boolean;
+  existingLabel?: string | null;
+  similarity?: number;
 }
 
 export async function writeMemory(
@@ -63,19 +79,58 @@ export async function writeMemory(
 ): Promise<WriteResult> {
   const {
     tenantId, spaceId, label, substance, confidence, embed,
-    kind, source, sourceRefs, supersedes, actor, agentId,
+    kind, sourceRefs, supersedes, actor, agentId,
     effectiveAt, expiresAt,
     isRemoteWrite, remoteOrigin, remoteClientClass, remoteRequestId,
-    correlationId,
+    correlationId, dedupGuard,
   } = params;
+
+  // Trust-authority chokepoint (defense-in-depth): /memory/write already
+  // clamps agent-supplied user_accepted, but writeMemory() is the single
+  // transactional write path — enforce the invariant HERE too so no future
+  // caller can reintroduce the self-grant. Agents never mint user_accepted;
+  // the caller-built substance must agree with the clamped source.
+  const { effectiveAgentWriteSource } = await import("./memory-authority");
+  const source = effectiveAgentWriteSource(params.source, agentId);
+  if (source !== params.source) {
+    substance.source_kind = source;
+    substance.accepted_by_user = false;
+  }
 
   const { insertRegistry, logEvent, transitionMemoryLifecycleInTx } = await import("./memory-lifecycle");
 
   // Atomic: advisory lock + addr allocation + node insert + source_refs +
   //         supersession + registry insert + created event.
   //         All must succeed or none commit.
-  const [result] = await sql.begin(async (tx: any) => {
+  const [result] = (await sql.begin(async (tx: any) => {
     await tx`SELECT pg_advisory_xact_lock(${REMEMBER_LOCK_ID})`;
+
+    // dedup-lock: optional in-lock dedup re-check (see WriteMemoryParams.dedupGuard).
+    // The caller's pre-lock dedup is optimistic; under concurrency two identical
+    // writes can both pass it before either inserts, then serialize here. Re-check
+    // inside the lock — where an earlier writer's insert is already committed and
+    // visible (READ COMMITTED) — and collapse this write instead of double-inserting.
+    if (dedupGuard) {
+      const [lockedDup] = await tx`
+        SELECT addr, label, 1 - (embedding_hv <=> ${dedupGuard.queryVecStr}::halfvec) as similarity
+        FROM nodes
+        WHERE space_id = ${spaceId} AND node_type = 'memory'
+          AND embedding_hv IS NOT NULL
+          AND dormant_at IS NULL
+          AND visibility <> 'deleted'
+          AND COALESCE(substance->>'project_addr', '') = ${dedupGuard.projectAddr}
+        ORDER BY embedding_hv <=> ${dedupGuard.queryVecStr}::halfvec
+        LIMIT 1
+      `;
+      if (lockedDup && parseFloat(lockedDup.similarity) > dedupGuard.threshold) {
+        return [{
+          addr: lockedDup.addr,
+          deduplicated: true,
+          existingLabel: lockedDup.label,
+          similarity: parseFloat(parseFloat(lockedDup.similarity).toFixed(3)),
+        }];
+      }
+    }
 
     const slot = await allocateChildSlotInTx(tx, "PROJECTS", null, { defaultDepth: 3 });
     const addr = slot.addr;
@@ -201,7 +256,19 @@ export async function writeMemory(
     );
 
     return [{ addr }];
-  });
+  })) as any[];
+
+  // dedup-lock: the in-lock recheck collapsed onto an existing node — surface it
+  // so the caller can return its deduplicated response instead of a fresh addr.
+  if (result.deduplicated) {
+    return {
+      ok: true,
+      addr: result.addr,
+      deduplicated: true,
+      existingLabel: result.existingLabel ?? null,
+      similarity: result.similarity,
+    };
+  }
 
   return { ok: true, addr: result.addr };
 }

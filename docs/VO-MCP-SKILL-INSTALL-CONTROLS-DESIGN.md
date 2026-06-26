@@ -1,5 +1,9 @@
 # VO MCP — Skill + Install Controls Design
 
+> **Operator-only commands ahead.** This doc references the private `agent-lab/` proof
+> scripts and the full operator `vo` CLI, which are **not part of the OSS source install**.
+> Public installs ship only the `vo-mcp` stdio binary (`vo-mcp install` / `vo-mcp doctor`).
+
 > **Scope:** living contract for the tenant-facing control model.
 > The **original** `VO-MCP-SKILL-INSTALL-CONTROLS-DESIGN-PR-1`
 > shipped this doc as a design-only artifact — no runtime, no
@@ -495,7 +499,7 @@ or future:
 The local `/dashboard` action runner exists today. Its contract
 (categories, preview → confirm → execute, backup-before-write,
 path-safety, redaction, status re-read) is pinned in
-`VO-MCP-LOCAL-ACTION-RUNNER-DESIGN`. This section maps
+`docs/VO-MCP-LOCAL-ACTION-RUNNER-DESIGN.md`. This section maps
 the Skill lifecycle above onto that contract — the three
 six shipped Skill actions — three Codex
 (`skill_install_codex` / `skill_disable_codex` /
@@ -1025,7 +1029,7 @@ Any future dashboard surface built on this design MUST:
 
 - **`docs/VO-MCP-ACTIVATION.md`** — operator activation flow
   (install → doctor → restart → confirm → record → rerun proof).
-- **`VO-MCP-LOCAL-ACTION-RUNNER-DESIGN`** — authoritative
+- **`docs/VO-MCP-LOCAL-ACTION-RUNNER-DESIGN.md`** — authoritative
   contract for the local `/dashboard` action runner. **Runtime
   runner exists today** (read-only doctors, Claude Desktop
   file_mutation install / force / rollback, and two
@@ -1052,7 +1056,7 @@ Any future dashboard surface built on this design MUST:
   under the local action runner" section above for the per-
   client state.
 - **`docs/VO-MCP-AGENT-USAGE.md`** — full agent usage kit.
-- **`VO-MCP-CROSS-CLIENT-INTEROP-PROOF`** — evidence
+- **`docs/VO-MCP-CROSS-CLIENT-INTEROP-PROOF.md`** — evidence
   matrix and artifact contracts.
 - **`docs/VO-MCP-SERVER-CONTRACT.md`** — binding per-rung
   contract.

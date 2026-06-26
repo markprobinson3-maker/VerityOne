@@ -46,8 +46,22 @@ export interface ReleaseGateInput {
   driftGuards: { ok: boolean; failed?: string[] };
   /** #68 EvalReport (the relevant subset). */
   goldenEval: Pick<EvalReport, "golden_pass_rate" | "degraded" | "minimum_pass_rate">;
-  /** #62 LifecycleAtomicityReport (the relevant subset). */
-  lifecycleAtomicity: Pick<LifecycleAtomicityReport, "clean" | "total_findings" | "by_severity">;
+  /**
+   * #62 LifecycleAtomicityReport (the relevant subset).
+   *
+   * The optional `source` field tracks which DB the atomicity scan targeted:
+   *   - 'prod':  the live production DB (the only meaningful source for release decisions).
+   *   - 'drift': the isolated verity_drift DB (fallback when prod resolution failed).
+   *   - 'dev':   a local/dev DB (localhost — local-dev ergonomics, treated as passing).
+   *   - absent:  old callers / local-dev without source tracking — backward-compat pass.
+   *
+   * When source === 'drift', the gate FAILS the atomicity check regardless of counts, because
+   * an empty drift DB always yields a meaningless clean verdict (invariant=0, torn=0). This
+   * is the core fix for the false-green lifecycle atomicity path (finding L1-1).
+   */
+  lifecycleAtomicity: Pick<LifecycleAtomicityReport, "clean" | "total_findings" | "by_severity"> & {
+    source?: 'prod' | 'drift' | 'dev';
+  };
   /** #11a LoopProof (the relevant subset). */
   operatingLoop: Pick<LoopProof, "ok" | "wired">;
 }
@@ -112,17 +126,27 @@ export function evaluateReleaseGate(input: ReleaseGateInput, opts: { generatedAt
 
   // lifecycle atomicity: by_severity must be PRESENT (an absent report is no evidence,
   // not "clean") and have no structural (invariant) or torn findings; drift self-heals.
+  //
+  // Source-tracking (L1-1 fix): when source === 'drift', the scan fell back to the
+  // isolated verity_drift DB (always empty) — a meaningless clean verdict. Refuse to
+  // certify regardless of counts. source === 'prod' or 'dev' or absent (backward-compat)
+  // are all accepted.
   const atom = input.lifecycleAtomicity;
   const sev = atom.by_severity;
-  const atomPassed = sev != null && sev.invariant === 0 && sev.torn === 0;
+  const atomSource = atom.source;
+  const isDriftFallback = atomSource === 'drift';
+  const countsClean = sev != null && sev.invariant === 0 && sev.torn === 0;
+  const atomPassed = !isDriftFallback && countsClean;
   checks.push({
     name: "lifecycle_atomicity",
     passed: atomPassed,
-    detail: sev == null
-      ? "atomicity report missing by_severity (no evidence)"
-      : atomPassed
-        ? `no invariant/torn findings (${atom.total_findings} total, drift-only)`
-        : `${sev.invariant} invariant + ${sev.torn} torn findings`,
+    detail: isDriftFallback
+      ? "atomicity scan fell back to drift DB (prod source unavailable) — refusing to certify"
+      : sev == null
+        ? "atomicity report missing by_severity (no evidence)"
+        : atomPassed
+          ? `no invariant/torn findings (${atom.total_findings} total, drift-only)`
+          : `${sev!.invariant} invariant + ${sev!.torn} torn findings`,
   });
 
   // operating-loop proof: must be green AND wired.

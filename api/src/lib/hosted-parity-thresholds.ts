@@ -1,5 +1,3 @@
-// Open-core stub. The VO+ implementation ships separately.
-
 export const HOSTED_PARITY_THRESHOLDS = {
   mirrorStaleAfterSeconds: 60 * 60,
   primaryStaleAfterSeconds: 24 * 60 * 60,

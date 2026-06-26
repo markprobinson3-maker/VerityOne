@@ -72,7 +72,7 @@ warm.get("/", async (c) => {
   const topK = format === "compact" ? 8 : 12;
   let candidates = await sql`
     SELECT n.addr, n.label, n.node_type, n.confidence, n.pyramid_id,
-      n.visibility, n.source_context, n.parent_addr, r.access_level,
+      n.visibility, n.space_id, n.source_context, n.parent_addr, r.access_level,
       n.substance->>'description' as description,
       n.substance->'quick_start' as quick_start,
       n.substance->'runbook' as runbook,
@@ -111,7 +111,7 @@ warm.get("/", async (c) => {
           AND e.to_addr = ${queryIntent.targetParentAddr || ""}
       )
       SELECT n.addr, n.label, n.node_type, n.confidence, n.pyramid_id,
-        n.visibility, n.source_context, n.parent_addr, r.access_level,
+        n.visibility, n.space_id, n.source_context, n.parent_addr, r.access_level,
         n.substance->>'description' as description,
         n.substance->'quick_start' as quick_start,
         n.substance->'runbook' as runbook,

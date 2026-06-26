@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { AccessContext } from "./access";
 import type { RetrievalIntent } from "./retrieval-intent";
 import { GLOBAL_SPACE_ID, tenantSpaceId } from "./spaces";
@@ -78,14 +80,22 @@ function canonicalFocusKey(goal: string): string {
   return terms.join("-").slice(0, 64);
 }
 
+// Runtime-portable stable hash: /ground is served from the serverless (Node)
+// bundle where the Bun global does not exist — Bun.hash here was a
+// ReferenceError that 500'd every gap-signal-producing /ground request in
+// production. node:crypto works under both Bun and Node.
+function stableHash(input: string): string {
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
+}
+
 function goalHash(goal: string): string {
-  return Bun.hash(goal.trim().toLowerCase()).toString(16);
+  return stableHash(goal.trim().toLowerCase());
 }
 
 function actorKey(access: AccessContext, explicitAgentId?: string | null): string {
   const agentId = explicitAgentId || access.agentId || null;
-  if (agentId) return `agent:${Bun.hash(`agent:${agentId}`).toString(16)}`;
-  if (access.token) return `token:${Bun.hash(`token:${access.token}`).toString(16)}`;
+  if (agentId) return `agent:${stableHash(`agent:${agentId}`)}`;
+  if (access.token) return `token:${stableHash(`token:${access.token}`)}`;
   return `scope:${access.scope}:${access.tenantId || GLOBAL_SPACE_ID}`;
 }
 
@@ -277,13 +287,13 @@ export async function recordGroundingGapSignals(sql: SqlTag, input: GroundingGap
   const currentFocusKey = canonicalFocusKey(goalText);
 
   for (const signal of signals) {
-    const currentDedupeKey = Bun.hash([
+    const currentDedupeKey = stableHash([
       signal.gapKey,
       signal.gapType,
       hashedGoal,
       currentActorKey,
       dedupeBucketKey(),
-    ].join("|")).toString(16);
+    ].join("|"));
 
     await sql`
       INSERT INTO grounding_gap_profiles (

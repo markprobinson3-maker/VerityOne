@@ -3,7 +3,7 @@
  * Source detection, extraction, dedup, truncation, splitting.
  */
 
-import { sql, normalizeUrl, preNormalizeUrl, loadParams, estimateTokens, shouldChunk, SOURCE_DETECTION_RULES, SOURCE_REGISTRY, type RawSource } from "./config";
+import { sql, normalizeUrl, preNormalizeUrl, loadParams, estimateTokens, shouldChunk, SOURCE_DETECTION_RULES, type RawSource } from "./config";
 import { emitWI } from "./events";
 
 // Adapter imports

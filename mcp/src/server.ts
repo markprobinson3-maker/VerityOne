@@ -45,7 +45,14 @@ export async function runServer(): Promise<void> {
     client = new VoClient(loadConfig());
   } catch (e) {
     if (e instanceof ConfigError) {
-      log("error", "config_error", { reason: e.reason, error: e.message });
+      // Carry the remediation INSIDE the structured line (the server contract
+      // forbids free-form prose on stderr) so a first-run user gets a fix path,
+      // mirroring the runtime errors.ts HINTS. (batch-31)
+      const hint =
+        e.reason === "no_token"
+          ? "add an agent_token to ~/.vo/config.json (or set VO_TOKEN), then restart. Set it up with: vo-mcp install --client <name>"
+          : undefined;
+      log("error", "config_error", { reason: e.reason, error: e.message, hint });
     } else {
       log("error", "fatal", { error: (e as Error).message });
     }

@@ -15,6 +15,7 @@
 import { Hono } from "hono";
 import { sql } from "../db";
 import { errorJson, ApiError } from "../lib/error-envelope";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 
 // Import pipeline functions from miners
 import { receive } from "../../../miners/src/wi/receive";
@@ -39,7 +40,9 @@ function wiAuditTenant(): string {
 // ============================================================
 
 app.post("/ingest", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
+  const parsed = await readBoundedJsonBody(c, 10_000_000);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value ?? {};
   const url = body.url;
   if (!url || typeof url !== "string") {
     return errorJson(c, "invalid_request", { message: "Missing 'url' in request body" });
@@ -227,7 +230,9 @@ app.get("/health", async (c) => {
 // ============================================================
 
 app.post("/ingest/batch", async (c) => {
-  const body = await c.req.json().catch(() => ({}));
+  const parsed = await readBoundedJsonBody(c, 10_000_000);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value ?? {};
   const urls = body.urls;
   if (!Array.isArray(urls) || urls.length === 0) {
     return errorJson(c, "invalid_request", { message: "Missing 'urls' array in request body" });
@@ -366,7 +371,9 @@ app.post("/skills/:id/approve", async (c) => {
 
 app.post("/skills/:id/reject", async (c) => {
   const id = parseInt(c.req.param("id"));
-  const body = await c.req.json().catch(() => ({}));
+  const parsed = await readBoundedJsonBody(c, 10_000_000);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value ?? {};
   const reason = body.reason || "Rejected by human reviewer";
 
   try {

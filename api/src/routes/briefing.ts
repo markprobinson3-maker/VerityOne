@@ -12,14 +12,44 @@ import { allowedRegistryAccessLevels, getAccessContext, visibleSpaceIds } from "
 import { isSyntheticGraphMutation, isSyntheticStimulus, isSyntheticText } from "../lib/public-graph";
 import { clampInt } from "../lib/utils";
 import { GLOBAL_SPACE_ID } from "../lib/spaces";
+import { errorJson } from "../lib/error-envelope";
 
 const briefing = new Hono();
+
+// Briefing is a "what changed recently" view. Bound how far back `since` can
+// go so an arbitrarily-old value can't force a full-table scan on stimuli/nodes
+// (the count queries below have no LIMIT).
+export const BRIEFING_MAX_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+/**
+ * Resolve the `since` query param to a bounded ISO timestamp.
+ * - missing → 24h ago (default window)
+ * - invalid → { ok: false } (caller returns a 400 envelope instead of letting
+ *   `new Date("garbage").toISOString()` throw a raw RangeError → 500)
+ * - older than the look-back floor → clamped to the floor
+ */
+export function resolveBriefingSince(
+  sinceParam: string | undefined,
+  nowMs: number,
+): { ok: true; since: string } | { ok: false } {
+  if (!sinceParam) {
+    return { ok: true, since: new Date(nowMs - 24 * 60 * 60 * 1000).toISOString() };
+  }
+  const parsed = new Date(sinceParam);
+  if (Number.isNaN(parsed.getTime())) return { ok: false };
+  const floor = nowMs - BRIEFING_MAX_LOOKBACK_MS;
+  const bounded = parsed.getTime() < floor ? new Date(floor) : parsed;
+  return { ok: true, since: bounded.toISOString() };
+}
 
 briefing.get("/", async (c) => {
   const access = getAccessContext(c);
   const spaceIds = visibleSpaceIds(access) || [GLOBAL_SPACE_ID];
-  const sinceParam = c.req.query("since");
-  const since = sinceParam ? new Date(sinceParam).toISOString() : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const resolvedSince = resolveBriefingSince(c.req.query("since"), Date.now());
+  if (!resolvedSince.ok) {
+    return errorJson(c, "invalid_request", { message: "since must be a valid ISO-8601 timestamp" });
+  }
+  const since = resolvedSince.since;
   const limit = clampInt(c.req.query("limit"), 10, 1, 50);
   const domain = c.req.query("domain") || null;
   const accessLevels = allowedRegistryAccessLevels(c);

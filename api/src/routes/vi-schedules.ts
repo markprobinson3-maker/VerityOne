@@ -292,7 +292,10 @@ async function fetchTextDocument(url: string): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const resp = await fetch(url, { signal: controller.signal });
+    // SSRF-guarded: RSS/OPML source URLs are operator-suppliable; block
+    // private/loopback/metadata targets and re-check every redirect hop.
+    const { ssrfGuardedFetch } = await import("../lib/ssrf-guard");
+    const resp = await ssrfGuardedFetch(url, { signal: controller.signal });
     if (!resp.ok) {
       throw new Error(`Fetch failed: ${resp.status}`);
     }

@@ -14,13 +14,39 @@
 import { sql, loadParams } from "./config";
 import { callFlashLite } from "../lib/llm";
 import { embedQuery, embedBatch, toVectorStr } from "@verity-one/embed";
-import { existsSync, mkdirSync, renameSync, rmSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, mkdirSync, renameSync } from "fs";
+import { join, dirname, resolve, sep } from "path";
 
-const SKILLS_DIR = join(process.env.HOME || "", ".config/verity/skills");
+const SKILLS_DIR = join(process.env.HOME || "", ".openclaw/workspace-main/skills");
 const STAGING_DIR = join(SKILLS_DIR, "_staging");
 const RETIRED_DIR = join(SKILLS_DIR, "_retired");
 const ROLLED_BACK_DIR = join(SKILLS_DIR, "_rolled_back");
+
+/**
+ * A filesystem-safe, single-segment slug for a skill directory derived from
+ * content. The old derivation could yield an EMPTY string for content with no
+ * alphanumerics (the trailing-dash strip emptied it), so `join(SKILLS_DIR, "")`
+ * resolved to the SKILLS_DIR root and SKILL.md was written / moved at the root.
+ * Strip leading AND trailing dashes and fall back to `skill-<id>`. The result
+ * is `[a-z0-9-]+` and never empty, so it cannot contain `/` or `..`.
+ */
+export function safeSkillSlug(content: string, id: number): string {
+  const slug = (content || "")
+    .slice(0, 40)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || `skill-${id}`;
+}
+
+/** Defense-in-depth: refuse to operate on a path outside SKILLS_DIR. */
+function assertUnderSkillsDir(p: string): void {
+  const root = resolve(SKILLS_DIR);
+  const target = resolve(p);
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new Error(`Refusing skill path outside SKILLS_DIR: ${p}`);
+  }
+}
 
 // ============================================================
 // DISCORD WEBHOOK
@@ -215,15 +241,12 @@ export async function installSkill(id: number): Promise<string> {
   const draftMd = skill.draft_md;
   if (!draftMd) throw new Error(`Skill ${id} has no draft_md`);
 
-  // Generate skill name from content
-  const name = skill.content
-    .slice(0, 40)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+$/, "");
+  // Generate a filesystem-safe skill name from content (never empty).
+  const name = safeSkillSlug(skill.content, skill.id);
 
   const skillDir = join(SKILLS_DIR, name);
   const skillPath = join(skillDir, "SKILL.md");
+  assertUnderSkillsDir(skillDir);
 
   // Check for existing (F3)
   if (existsSync(skillPath)) {

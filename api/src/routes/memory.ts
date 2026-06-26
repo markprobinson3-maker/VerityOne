@@ -3,7 +3,7 @@
  *
  * Routes:
  *   POST /memory/write    — create a new memory
- *   POST /memory/recall   — recall memories (stub, PR-4)
+ *   POST /memory/recall   — recall memories (semantic + policy-scoped; live)
  *   POST /memory/update   — update an existing memory
  *   POST /memory/retract  — retract a memory (mark invalid)
  *   POST /memory/forget   — archive a memory (hide from recall)
@@ -12,6 +12,7 @@
 
 import { Hono } from "hono";
 import { sql } from "../db";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 import { embedQuery, toVectorStr, embedTextForInsert, embeddingTextForNode } from "../lib/embed";
 import { getAccessContext, allowedRegistryAccessLevels, resolveAgentTenant } from "../lib/access";
 import {
@@ -31,7 +32,8 @@ import { readRemoteProvenanceHeaders } from "../lib/remote-provenance";
 import { resolveAgentPolicy } from "../lib/agent-policy";
 import { resolveTenantSettings } from "../lib/runtime-profile";
 import { enrichWithPublicResonance, type PublicResonanceBlock } from "../lib/public-resonance";
-import { errorJson } from "../lib/error-envelope";
+import { errorJson, ApiError } from "../lib/error-envelope";
+import { classifyEmbedUnavailable } from "../lib/embed-availability";
 import { auditMutation } from "../lib/audit";
 import { writeEdge } from "../lib/edge-mutations";
 import { classifyMemoryWriteQuality, lexicalOverlapStats } from "../lib/memory-quality";
@@ -39,9 +41,18 @@ import { classifyMemoryWriteQuality, lexicalOverlapStats } from "../lib/memory-q
 // change to the canonical default propagates without per-call-site edits.
 import { coalesceMaturityStage } from "@verity-one/graph-shape";
 
+// L2-1 (batch-28): byte cap for all memory POST/PATCH body reads.
+const MEMORY_MAX_BODY_BYTES = 50_000;
+
 const memory = new Hono();
 
 // ── Helpers ──
+
+// Trust authority moved to lib/memory-authority.ts so the writeMemory()
+// chokepoint shares the same clamp (re-exported here for callers/tests that
+// import it from the route module).
+import { effectiveAgentWriteSource } from "../lib/memory-authority";
+export { effectiveAgentWriteSource };
 
 const BOOTSTRAP_CONTEXT_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -105,13 +116,19 @@ memory.post("/write", async (c) => {
   const { remoteOrigin, remoteClientClass, remoteRequestId, isRemoteWrite } =
     readRemoteProvenanceHeaders(c.req);
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const validation = validateWriteRequest(body);
   if (!validation.valid) {
     return errorJson(c, "validation_failed", { details: { errors: validation.errors } });
   }
 
   const req = validation.data;
+  // SECURITY (trust authority): mirror /memory/approve — agent/API callers cannot mint
+  // user_accepted (which carries accepted_by_user, dormancy protection, AND the quality-gate
+  // bypass). Coerce to its honest authority before any downstream use.
+  req.source = effectiveAgentWriteSource(req.source, access.agentId);
   const spaceId = `tenant:${access.tenantId}`;
   const label = req.subject || req.assertion.slice(0, 80);
   const federation = resolveFederationMetadata(req.federation);
@@ -219,11 +236,21 @@ memory.post("/write", async (c) => {
   //     used only for the duplicate-search comparison below.
   //   - embedTextForInsert on the canonical node text produces a
   //     document-task vector, used only as the stored embedding_hv.
-  const queryVec = await embedQuery(req.assertion);
+  let queryVec: number[];
+  let storedEmbed: Awaited<ReturnType<typeof embedTextForInsert>>;
+  try {
+    queryVec = await embedQuery(req.assertion);
+    storedEmbed = await embedTextForInsert(
+      embeddingTextForNode(label.slice(0, 120), substance),
+    );
+  } catch (err) {
+    // First-run honesty: a missing/invalid embedding key must say so (and
+    // how to fix it), not surface as a bare internal_error.
+    const embedDown = classifyEmbedUnavailable(err);
+    if (embedDown) throw new ApiError("embedding_service_unavailable", embedDown.message, undefined, embedDown.hint);
+    throw err;
+  }
   const queryVecStr = toVectorStr(queryVec);
-  const storedEmbed = await embedTextForInsert(
-    embeddingTextForNode(label.slice(0, 120), substance),
-  );
 
   // Dedup check uses the query-task vector against the document-task
   // vectors stored in nodes (Gemini's task-aware embeddings align
@@ -247,37 +274,47 @@ memory.post("/write", async (c) => {
     // This preserves traceability when the same fact is cited from a new source.
     let sourceRefsMerged = 0;
     if (sourceRefs && sourceRefs.length > 0) {
-      const [existingNode] = await sql`
-        SELECT source_refs, substance->>'memory_type' as kind,
-               substance->>'source_link_status' as existing_source_link_status
-        FROM nodes
-        WHERE addr = ${dupCheck.addr}
-          AND visibility <> 'deleted'
-      `;
-      const existingRefs: SourceRef[] = Array.isArray(existingNode?.source_refs)
-        ? (existingNode.source_refs as SourceRef[])
-        : [];
-      const existingPaths = new Set(existingRefs.filter((r) => r.path).map((r) => r.path));
-      const existingUrls = new Set(existingRefs.filter((r) => r.url).map((r) => r.url));
-      const toAdd = sourceRefs.filter((r) => {
-        if (r.path && existingPaths.has(r.path)) return false;
-        if (r.url && existingUrls.has(r.url)) return false;
-        return true;
-      });
-      if (toAdd.length > 0) {
-        const merged = [...existingRefs, ...toAdd];
-        const existingKind = (existingNode?.kind || req.kind) as MemoryKind;
-        const newStatus = computeSourceLinkStatus(existingKind, merged);
-        await sql`
-          UPDATE nodes SET
-            source_refs = ${sql.json(merged)},
-            substance = substance || ${sql.json({ source_link_status: newStatus })}::jsonb,
-            updated_at = now()
+      // Atomic read-modify-write (batch-31): two concurrent dedup hits on the same
+      // node each merging a distinct new source would last-writer-win and lose one
+      // set of refs. Serialize on the row with SELECT … FOR UPDATE inside a tx, and
+      // scope by space_id (addr is a global PK — this matches the file's defensive
+      // convention and is belt-and-suspenders against any future addr reuse).
+      await sql.begin(async (tx: any) => {
+        const [existingNode] = await tx`
+          SELECT source_refs, substance->>'memory_type' as kind,
+                 substance->>'source_link_status' as existing_source_link_status
+          FROM nodes
           WHERE addr = ${dupCheck.addr}
+            AND space_id = ${spaceId}
             AND visibility <> 'deleted'
+          FOR UPDATE
         `;
-        sourceRefsMerged = toAdd.length;
-      }
+        const existingRefs: SourceRef[] = Array.isArray(existingNode?.source_refs)
+          ? (existingNode.source_refs as SourceRef[])
+          : [];
+        const existingPaths = new Set(existingRefs.filter((r) => r.path).map((r) => r.path));
+        const existingUrls = new Set(existingRefs.filter((r) => r.url).map((r) => r.url));
+        const toAdd = sourceRefs.filter((r) => {
+          if (r.path && existingPaths.has(r.path)) return false;
+          if (r.url && existingUrls.has(r.url)) return false;
+          return true;
+        });
+        if (toAdd.length > 0) {
+          const merged = [...existingRefs, ...toAdd];
+          const existingKind = (existingNode?.kind || req.kind) as MemoryKind;
+          const newStatus = computeSourceLinkStatus(existingKind, merged);
+          await tx`
+            UPDATE nodes SET
+              source_refs = ${sql.json(merged)},
+              substance = substance || ${sql.json({ source_link_status: newStatus })}::jsonb,
+              updated_at = now()
+            WHERE addr = ${dupCheck.addr}
+              AND space_id = ${spaceId}
+              AND visibility <> 'deleted'
+          `;
+          sourceRefsMerged = toAdd.length;
+        }
+      });
     }
     return c.json({
       ok: true,
@@ -351,7 +388,25 @@ memory.post("/write", async (c) => {
     remoteClientClass: remoteClientClass ?? undefined,
     remoteRequestId: remoteRequestId ?? undefined,
     correlationId,
+    // dedup-lock: re-check dedup INSIDE writeMemory's advisory lock with the same
+    // scope as the pre-lock check above, so two concurrent identical writes that
+    // both passed the pre-lock dedup collapse to one node instead of double-inserting.
+    dedupGuard: { queryVecStr, threshold: 0.85, projectAddr: req.project_addr ?? "" },
   });
+
+  // dedup-lock: a concurrent identical write won the race inside the lock and
+  // committed first — collapse this one (same response shape as the pre-lock
+  // dedup fast path) instead of auditing a phantom create.
+  if (result.deduplicated) {
+    return c.json({
+      ok: true,
+      deduplicated: true,
+      existing_addr: result.addr,
+      existing_label: result.existingLabel ?? null,
+      similarity: result.similarity,
+      message: "Skipped — semantically similar memory already exists",
+    });
+  }
 
   // F9: operator-facing audit row (the lifecycle row in memory_events
   // is written transactionally by writeMemory itself).
@@ -452,7 +507,8 @@ memory.post("/write", async (c) => {
   });
 });
 
-// ── POST /memory/recall (stub — full implementation in PR-4) ──
+// ── POST /memory/recall ── (live: semantic recall + policy scoping; see also
+//    /memory/recall/routed below for the domain-aware sibling)
 
 memory.post("/recall", async (c) => {
   const access = getAccessContext(c);
@@ -460,7 +516,9 @@ memory.post("/recall", async (c) => {
     return errorJson(c, "tenant_required");
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const query = (body?.query || "").trim();
   if (!query) {
     return errorJson(c, "invalid_request", { message: "query field required" });
@@ -487,10 +545,14 @@ memory.post("/recall", async (c) => {
       if (row?.metadata && typeof row.metadata === "object") {
         storedMetadata = row.metadata as Record<string, unknown>;
       }
-    } catch { /* DB error → no filtering */ }
-    const machineSettings = resolveTenantSettings();
-    const effective = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings);
-    visibleProjectAddrs = effective.visible_projects;
+      const machineSettings = resolveTenantSettings();
+      visibleProjectAddrs = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings).visible_projects;
+    } catch {
+      // SECURITY: fail CLOSED. Could not load the agent's project policy → do NOT widen to
+      // the permissive default (visible_projects=null=all). Restrict to no projects ([], which
+      // the !visibleProjectAddrs consumers treat as deny) until the policy DB is readable.
+      visibleProjectAddrs = [];
+    }
   }
 
   const machineSettings = resolveTenantSettings();
@@ -502,8 +564,15 @@ memory.post("/recall", async (c) => {
       // Reuse the metadata already fetched above for visible_projects if it exists
       const [row] = await sql`SELECT metadata FROM agent_profiles WHERE tenant_id = ${resolveAgentTenant(c, access.agentId)} AND agent_id = ${access.agentId}`;
       if (row?.metadata && typeof row.metadata === "object") storedMeta = row.metadata as Record<string, unknown>;
-    } catch { /* */ }
-    effectiveRecallScope = resolveAgentPolicy(access.agentId, storedMeta, machineSettings).recall_scope;
+      effectiveRecallScope = resolveAgentPolicy(access.agentId, storedMeta, machineSettings).recall_scope;
+    } catch {
+      // SECURITY: fail CLOSED (batch-31). A transient agent_profiles read failure must
+      // NARROW, not widen. resolveAgentPolicy(null) returns "tenant_and_public" under the
+      // default "assist" config, which would silently surface overlay + public content for
+      // an agent explicitly set to tenant_private. Restrict to the most private scope until
+      // the policy DB is readable (mirrors the visible_projects fail-closed above).
+      effectiveRecallScope = "tenant_private";
+    }
   }
 
   const result = await compileRecall(sql, {
@@ -561,7 +630,9 @@ memory.post("/recall/routed", async (c) => {
     return errorJson(c, "tenant_required");
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const query = (body?.query || "").trim();
   if (!query) {
     return errorJson(c, "invalid_request", { message: "query field required" });
@@ -586,10 +657,14 @@ memory.post("/recall/routed", async (c) => {
       if (row?.metadata && typeof row.metadata === "object") {
         storedMetadata = row.metadata as Record<string, unknown>;
       }
-    } catch { /* DB error → no filtering */ }
-    const machineSettings = resolveTenantSettings();
-    const effective = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings);
-    visibleProjectAddrs = effective.visible_projects;
+      const machineSettings = resolveTenantSettings();
+      visibleProjectAddrs = resolveAgentPolicy(access.agentId, storedMetadata, machineSettings).visible_projects;
+    } catch {
+      // SECURITY: fail CLOSED. Could not load the agent's project policy → do NOT widen to
+      // the permissive default (visible_projects=null=all). Restrict to no projects ([], which
+      // the !visibleProjectAddrs consumers treat as deny) until the policy DB is readable.
+      visibleProjectAddrs = [];
+    }
   }
 
   const machineSettingsRouted = resolveTenantSettings();
@@ -599,8 +674,13 @@ memory.post("/recall/routed", async (c) => {
     try {
       const [row] = await sql`SELECT metadata FROM agent_profiles WHERE tenant_id = ${resolveAgentTenant(c, access.agentId)} AND agent_id = ${access.agentId}`;
       if (row?.metadata && typeof row.metadata === "object") storedMeta = row.metadata as Record<string, unknown>;
-    } catch { /* */ }
-    effectiveRecallScopeRouted = resolveAgentPolicy(access.agentId, storedMeta, machineSettingsRouted).recall_scope;
+      effectiveRecallScopeRouted = resolveAgentPolicy(access.agentId, storedMeta, machineSettingsRouted).recall_scope;
+    } catch {
+      // SECURITY: fail CLOSED (batch-31) — narrow to tenant_private on a transient
+      // policy-read failure rather than widening to the permissive default. See the
+      // /recall handler above.
+      effectiveRecallScopeRouted = "tenant_private";
+    }
   }
 
   const startMs = Date.now();
@@ -651,7 +731,9 @@ memory.post("/update", async (c) => {
     return errorJson(c, "tenant_required");
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const addr = (body?.addr || "").trim();
   if (!addr) {
     return errorJson(c, "invalid_request", { message: "addr field required" });
@@ -707,7 +789,9 @@ memory.post("/retract", async (c) => {
     return errorJson(c, "tenant_required");
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const addr = (body?.addr || "").trim();
   const reason = (body?.reason || "").trim();
   if (!addr) {
@@ -749,7 +833,9 @@ memory.post("/forget", async (c) => {
     return errorJson(c, "tenant_required");
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const addr = (body?.addr || "").trim();
   if (!addr) {
     return errorJson(c, "invalid_request", { message: "addr field required" });
@@ -1028,7 +1114,9 @@ memory.post("/promote-overlay", async (c) => {
     return errorJson(c, "tenant_required", { message: "Tenant auth required for promotion." });
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const overlayAddr = (body?.overlay_addr || "").trim();
   if (!overlayAddr) {
     return errorJson(c, "invalid_request", { message: "overlay_addr is required." });
@@ -1078,7 +1166,9 @@ memory.post("/approve", async (c) => {
     });
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, MEMORY_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const addr = (body?.addr || "").trim();
   if (!addr) {
     return errorJson(c, "invalid_request", { message: "addr is required." });

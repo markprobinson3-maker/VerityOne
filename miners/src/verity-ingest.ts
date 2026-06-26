@@ -17,7 +17,7 @@
  *   bun run miners/src/verity-ingest.ts --queue
  */
 
-import { sql, EXIT } from "./vi/config";
+import { sql } from "./vi/config";
 import { receive, releaseLock } from "./vi/receive";
 import { atomize } from "./vi/atomize";
 import { weigh } from "./vi/weigh";
@@ -171,7 +171,6 @@ async function retryPending(): Promise<void> {
   console.log(`Retrying ${pending.length} failed chunks...\n`);
 
   const { callFlash } = await import("./lib/llm");
-  const { embedBatch, toVectorStr } = await import("../../api/src/lib/embed");
 
   let success = 0, failed = 0;
 

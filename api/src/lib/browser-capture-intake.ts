@@ -225,11 +225,7 @@ export function writeBrowserCaptureIntake(
   const relativeDir = path.join("inbox", "web-clips");
   const targetDir = path.join(vaultRoot, relativeDir);
   const filename = `${stableTimestampForFilename(now)}-${slugify(titleRaw)}.md`;
-  const targetPath = uniquePath(path.join(targetDir, filename));
-  const relativePath = path.relative(vaultRoot, targetPath).split(path.sep).join("/");
-  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-    return { ok: false, reason: "write_failed", message: "Resolved capture path escaped the vault root." };
-  }
+  const basePath = path.join(targetDir, filename);
 
   const sourceUrl = parsedUrl.url.toString();
   const content = renderMarkdown({
@@ -243,15 +239,34 @@ export function writeBrowserCaptureIntake(
 
   try {
     fs.mkdirSync(targetDir, { recursive: true });
-    fs.writeFileSync(targetPath, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    return {
-      ok: true,
-      path: targetPath,
-      relative_path: relativePath,
-      source_url: sourceUrl,
-      source_domain: parsedUrl.url.hostname,
-      clipped_at: capturedAt.value.toISOString(),
-    };
+    // uniquePath() picks a free name, but a concurrent same-title capture can win the
+    // gap before our exclusive (wx) write — yielding EEXIST. Retry with a freshly
+    // recomputed unique path instead of failing (batch-23 D6); this also covers
+    // uniquePath()'s previously-unchecked random fallback.
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const targetPath = uniquePath(basePath);
+      const relativePath = path.relative(vaultRoot, targetPath).split(path.sep).join("/");
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        return { ok: false, reason: "write_failed", message: "Resolved capture path escaped the vault root." };
+      }
+      try {
+        fs.writeFileSync(targetPath, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        return {
+          ok: true,
+          path: targetPath,
+          relative_path: relativePath,
+          source_url: sourceUrl,
+          source_domain: parsedUrl.url.hostname,
+          clipped_at: capturedAt.value.toISOString(),
+        };
+      } catch (e) {
+        lastErr = e as Error;
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; // real error → outer catch
+        // EEXIST: another capture took this exact path; recompute + retry.
+      }
+    }
+    return { ok: false, reason: "write_failed", message: `Could not allocate a unique capture filename after retries: ${lastErr?.message ?? "EEXIST"}` };
   } catch (e) {
     return { ok: false, reason: "write_failed", message: (e as Error).message };
   }

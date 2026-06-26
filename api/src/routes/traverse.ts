@@ -8,7 +8,11 @@
  * Shortest path:
  *   GET /traverse?from=OC.0.2.1&to=META.0.1.3
  *
- * Max 5 hops. 653 nodes is trivial for BFS.
+ * Max 5 hops. The graph is now ~8.8k nodes (909 beta-visible public); a
+ * direction=both BFS from a hub can reach most of the reachable component, so
+ * per-request work is bounded by the caps below — not by the old "trivial"
+ * assumption. Each visited node costs one loadNode + one fetchConnectedEdges
+ * round-trip, so the node-visit count is the real cost ceiling.
  */
 
 import { Hono } from "hono";
@@ -20,6 +24,14 @@ import { clampInt, splitQuery } from "../lib/utils";
 import { GLOBAL_SPACE_ID } from "../lib/spaces";
 
 const traverse = new Hono();
+
+// Per-request work ceilings (batch-31 DoS bound). A hub-rooted 5-hop
+// direction=both walk would otherwise enumerate the whole reachable component
+// as 1000+ serial DB round-trips. These cap the node-visit count (the dominant
+// cost) and the fanout enqueued per node; results are marked `truncated` when hit.
+const MAX_TRAVERSE_NODES = 2000;
+const MAX_TRAVERSE_VISITED = 5000;
+const MAX_EDGES_PER_NODE = 500;
 
 type Direction = "outbound" | "inbound" | "both";
 
@@ -165,8 +177,15 @@ async function bfsTraverse(
   const resultNodes: any[] = [];
   const resultEdges: any[] = [];
   const seenEdges = new Set<string>();
+  let truncated = false;
 
   while (queue.length > 0) {
+    // Per-request work ceiling: stop before the next loadNode/fetchConnectedEdges
+    // round-trip once we've materialized enough of the component.
+    if (resultNodes.length >= MAX_TRAVERSE_NODES || visited.size >= MAX_TRAVERSE_VISITED) {
+      truncated = true;
+      break;
+    }
     const { addr, hop } = queue.shift()!;
     if (visited.has(addr) || hop > maxHops) continue;
     visited.add(addr);
@@ -178,7 +197,11 @@ async function bfsTraverse(
 
     // Fetch connected edges (respect direction and type filters)
     if (hop < maxHops) {
-      const edges = await fetchConnectedEdges(addr, edgeTypes, direction, access, accessLevels);
+      const allEdges = await fetchConnectedEdges(addr, edgeTypes, direction, access, accessLevels);
+      // Bound the fanout enqueued/recorded per node (a single hub can carry
+      // hundreds of edges); deterministic slice keeps results stable.
+      const edges = allEdges.length > MAX_EDGES_PER_NODE ? allEdges.slice(0, MAX_EDGES_PER_NODE) : allEdges;
+      if (allEdges.length > MAX_EDGES_PER_NODE) truncated = true;
 
       for (const edge of edges) {
         const edgeKey = `${edge.from_addr}-${edge.to_addr}-${edge.edge_type}`;
@@ -195,7 +218,7 @@ async function bfsTraverse(
     }
   }
 
-  return { nodes: resultNodes, edges: resultEdges };
+  return { nodes: resultNodes, edges: resultEdges, truncated };
 }
 
 // --- Shortest Path (BFS, unweighted) ---
@@ -217,11 +240,16 @@ async function shortestPath(
   visited.add(from);
 
   while (queue.length > 0) {
+    // Same per-request work ceiling as bfsTraverse — bound the node-visit count
+    // (each iteration is one fetchConnectedEdges round-trip). If the target
+    // isn't reached within the budget, we return null (no path within budget).
+    if (visited.size >= MAX_TRAVERSE_VISITED) break;
     const { addr, hop } = queue.shift()!;
     if (addr === to) break;
     if (hop >= maxHops) continue;
 
-    const edges = await fetchConnectedEdges(addr, edgeTypes, "both", access, accessLevels);
+    const allEdges = await fetchConnectedEdges(addr, edgeTypes, "both", access, accessLevels);
+    const edges = allEdges.length > MAX_EDGES_PER_NODE ? allEdges.slice(0, MAX_EDGES_PER_NODE) : allEdges;
 
     for (const edge of edges) {
       const neighbor = (edge as any).neighbor_addr || (edge.from_addr === addr ? edge.to_addr : edge.from_addr);
@@ -356,6 +384,7 @@ traverse.get("/", async (c) => {
     ontology: formatOntologyBridgePayload(bridgeContext),
     path_semantics: summarizePathSemantics(result.edges),
     count: { nodes: result.nodes.length, edges: result.edges.length },
+    ...(result.truncated ? { truncated: true } : {}),
     ms: Date.now() - startMs,
   });
 });

@@ -99,7 +99,7 @@ const TAG_RE = /^[a-z0-9_-]{1,64}$/;
 const SOURCE_REF_TYPE_RE = /^[a-z][a-z0-9_]{0,63}$/;
 const FORBIDDEN_SOURCE_REF_TYPES = new Set(["prototype", "constructor"]);
 const PJ_ADDR_RE = /^PJ\.[0-9]+(\.[0-9]+)*$/;
-// The VO-token alternative enumerates real token prefixes only (vop_REDACTED, voc_,
+// The VO-token alternative enumerates real token prefixes only (vop_, voc_,
 // vocr_, voca_, vobc_, vodg_, vons_, vos_, voa_) and requires a body of at
 // least 6 chars. Command-only prefixes like voj_, vor_, vow_, vol_ are
 // deliberately excluded so short slug tags such as `voj_smoke` or `voc_test`

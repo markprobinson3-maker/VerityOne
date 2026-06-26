@@ -34,6 +34,14 @@ import { auditMutation } from "../lib/audit";
 
 const tenantPyramids = new Hono();
 
+// Type-safe body field read (batch-26, same class as batch-25 providers/L5).
+// `readStringField(body?.x)` threw on a truthy non-string (e.g. { label: 42 }),
+// 500-ing instead of returning the route's canonical invalid_request. Mirrors
+// providers.ts / account.ts / remote.ts.
+function readStringField(value: unknown): string {
+  return value == null ? "" : String(value).trim();
+}
+
 // ── Resolve tenant ID ───────────────────────────────────────────────
 // Same pattern as /projects: operator uses ?tenant_id, beta uses token.
 
@@ -119,8 +127,8 @@ tenantPyramids.post("/", async (c) => {
     return errorJson(c, "invalid_request", { message: "JSON body required" });
   }
 
-  const label = (body?.label || "").trim();
-  const tenantId = (body?.tenant_id || "").trim();
+  const label = readStringField(body?.label);
+  const tenantId = readStringField(body?.tenant_id);
   const syncLevel = body?.sync_level;
 
   if (!label) return errorJson(c, "invalid_request", { message: "label is required" });
@@ -161,8 +169,8 @@ tenantPyramids.post("/:id/rename", async (c) => {
     return errorJson(c, "invalid_request", { message: "JSON body required" });
   }
 
-  const newLabel = (body?.label || "").trim();
-  const tenantId = (body?.tenant_id || "").trim();
+  const newLabel = readStringField(body?.label);
+  const tenantId = readStringField(body?.tenant_id);
   if (!newLabel) return errorJson(c, "invalid_request", { message: "label is required" });
   if (!tenantId) return errorJson(c, "invalid_request", { message: "tenant_id is required" });
 
@@ -198,7 +206,7 @@ tenantPyramids.post("/:id/delete", async (c) => {
     body = {};
   }
 
-  const tenantId = (body?.tenant_id || "").trim();
+  const tenantId = readStringField(body?.tenant_id);
   if (!tenantId) return errorJson(c, "invalid_request", { message: "tenant_id is required" });
 
   try {
@@ -232,8 +240,8 @@ tenantPyramids.post("/:id/level", async (c) => {
     return errorJson(c, "invalid_request", { message: "JSON body required" });
   }
 
-  const tenantId = (body?.tenant_id || "").trim();
-  const syncLevel = (body?.sync_level || "").trim();
+  const tenantId = readStringField(body?.tenant_id);
+  const syncLevel = readStringField(body?.sync_level);
   if (!tenantId) return errorJson(c, "invalid_request", { message: "tenant_id is required" });
   if (!syncLevel) return errorJson(c, "invalid_request", { message: "sync_level is required" });
 

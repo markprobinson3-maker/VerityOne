@@ -46,6 +46,17 @@ interface Archetype {
 
 const callFlash = (prompt: string) => callFlashLLM(prompt, { temperature: 0.2 });
 
+/**
+ * Confidence for a capability cluster from how many pyramids it spans. Capped at 0.9 so the
+ * value stays a valid [0,1] probability — there are 10 registered pyramids, so the uncapped
+ * `0.6 + count*0.05` produced 1.05 (9 pyramids) / 1.10 (10) and wrote out-of-range values to
+ * proposals.confidence (REAL, no CHECK). Matches the Math.min(0.9, …) cap used by the edge-bridge
+ * formula below and in supercron.
+ */
+export function clusterConfidence(pyramidCount: number): number {
+  return Math.min(0.9, 0.6 + pyramidCount * 0.05);
+}
+
 // Strategy 1: Capability clustering via "provides" overlap
 async function findCapabilityClusters(): Promise<Archetype[]> {
   console.log("\n  🔍 Strategy 1: Capability overlap across pyramids...");
@@ -80,7 +91,7 @@ async function findCapabilityClusters(): Promise<Archetype[]> {
       description: `The capability "${c.capability}" appears across ${c.pyramid_count} pyramids (${(c.pyramids as string[]).join(', ')}), suggesting a fundamental pattern.`,
       instances: c.instances as any[],
       pyramids: c.pyramids as string[],
-      confidence: 0.6 + (c.pyramid_count as number) * 0.05,
+      confidence: clusterConfidence(c.pyramid_count as number),
     });
   }
 
@@ -304,7 +315,10 @@ async function main() {
   await sql.end();
 }
 
-main().catch((e) => {
-  console.error("Fatal:", e);
-  process.exit(1);
-});
+// Only run the CLI when executed directly, not when imported (e.g. by a test).
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Fatal:", e);
+    process.exit(1);
+  });
+}

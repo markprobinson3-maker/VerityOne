@@ -26,6 +26,8 @@
  * worker context.
  */
 
+import { normalizeLoopbackBind } from "./loopback-proxy";
+
 export interface CanonicalScheduleResponse {
   status: number;
   ok: boolean;
@@ -33,13 +35,16 @@ export interface CanonicalScheduleResponse {
 }
 
 function internalOperatorToken(): string {
-  const raw = process.env.VERITY_OPERATOR_TOKENS || "change-me-in-production";
-  const first = raw.split(",")[0]?.trim() || "";
+  const raw = process.env.VERITY_OPERATOR_TOKENS;
+  const first = raw ? raw.split(",")[0]?.trim() : "";
+  if (!first) {
+    throw new Error("VERITY_OPERATOR_TOKENS not configured (should have been validated at startup)");
+  }
   return first;
 }
 
 function internalApiBase(): string {
-  const host = process.env.VERITY_API_BIND || "127.0.0.1";
+  const host = normalizeLoopbackBind(process.env.VERITY_API_BIND || "127.0.0.1");
   const port = process.env.VERITY_API_PORT || "3100";
   return `http://${host}:${port}`;
 }

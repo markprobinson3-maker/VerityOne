@@ -13,6 +13,7 @@
 
 import { Hono } from "hono";
 import { sql } from "../db";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 import { getAccessContext, isOperator } from "../lib/access";
 import {
   readProviderSummary,
@@ -27,7 +28,18 @@ import { errorJson, ApiError } from "../lib/error-envelope";
 import { auditMutation } from "../lib/audit";
 import { listTenantAgentIds } from "../lib/agent-override";
 
+// L2-6 (batch-28): byte cap for all providers POST body reads.
+const PROVIDERS_MAX_BODY_BYTES = 64_000;
+
 const providers = new Hono();
+
+// Type-safe string field read (batch-25 #5). The previous `(body?.x || "").trim()`
+// threw on a truthy non-string (e.g. { provider: 42 }), 500-ing instead of
+// returning invalid_request. Matches the readStringField copies in account.ts /
+// remote.ts: a non-string coerces to its String() form, null/undefined → "".
+function readStringField(value: unknown): string {
+  return value == null ? "" : String(value).trim();
+}
 
 // ── GET /providers/status ────────────────────────────────────────────
 
@@ -72,13 +84,19 @@ providers.get("/status", async (c) => {
 // ── POST /providers/validate ─────────────────────────────────────────
 
 providers.post("/validate", async (c) => {
-  const access = getAccessContext(c);
-  if (!access.tenantId) {
-    return errorJson(c, "tenant_required", { message: "Tenant context required." });
+  // Operator-only, matching every other /providers mutation (defaults, key,
+  // overrides). Validation makes an external provider API call and mutates the
+  // local validation cache (provider-validate.ts updateValidationCache); a
+  // tenant/beta token must not be able to drive either. The dashboard validate
+  // bridge is already operator-gated — this brings the direct route to parity.
+  if (!isOperator(c)) {
+    return errorJson(c, "operator_required", { message: "Operator auth required to validate a provider." });
   }
 
-  const body = await c.req.json().catch(() => null);
-  const provider = ((body as any)?.provider || "").trim();
+  const bounded = await readBoundedJsonBody(c, PROVIDERS_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
+  const provider = readStringField((body as any)?.provider);
   if (!provider) {
     return errorJson(c, "invalid_request", { message: "provider is required." });
   }
@@ -94,10 +112,12 @@ providers.post("/defaults", async (c) => {
     return errorJson(c, "operator_required", { message: "Operator auth required for task routing changes." });
   }
 
-  const body = await c.req.json().catch(() => null);
-  const task = ((body as any)?.task || "").trim();
-  const provider = ((body as any)?.provider || "").trim();
-  const model = ((body as any)?.model || "").trim();
+  const bounded = await readBoundedJsonBody(c, PROVIDERS_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
+  const task = readStringField((body as any)?.task);
+  const provider = readStringField((body as any)?.provider);
+  const model = readStringField((body as any)?.model);
 
   if (!task) return errorJson(c, "invalid_request", { message: "task is required." });
   if (!provider) return errorJson(c, "invalid_request", { message: "provider is required." });
@@ -135,8 +155,10 @@ providers.post("/defaults/clear", async (c) => {
     return errorJson(c, "operator_required", { message: "Operator auth required for task routing changes." });
   }
 
-  const body = await c.req.json().catch(() => null);
-  const taskType = ((body as any)?.task_type || "").trim();
+  const bounded = await readBoundedJsonBody(c, PROVIDERS_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
+  const taskType = readStringField((body as any)?.task_type);
   if (!taskType) return errorJson(c, "invalid_request", { message: "task_type is required." });
 
   // Defense-in-depth: also enforce canonical-task at the route layer
@@ -173,12 +195,14 @@ providers.post("/agent-override", async (c) => {
     return errorJson(c, "operator_required", { message: "Operator auth required for agent LLM overrides." });
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, PROVIDERS_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const bodyTenantId = ((body as any)?.tenant_id || "").toString().trim();
-  const agentId = ((body as any)?.agent_id || "").trim();
-  const task = ((body as any)?.task || "").trim();
-  const provider = ((body as any)?.provider || "").trim();
-  const model = ((body as any)?.model || "").trim();
+  const agentId = readStringField((body as any)?.agent_id);
+  const task = readStringField((body as any)?.task);
+  const provider = readStringField((body as any)?.provider);
+  const model = readStringField((body as any)?.model);
 
   // Tenant resolution (parallel to /dashboard/providers/agent-override):
   //   - A tenant token carries `tenantId` directly on the AccessContext.
@@ -234,10 +258,12 @@ providers.post("/agent-override/clear", async (c) => {
     return errorJson(c, "operator_required", { message: "Operator auth required for agent LLM overrides." });
   }
 
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedJsonBody(c, PROVIDERS_MAX_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = bounded.value;
   const bodyTenantId = ((body as any)?.tenant_id || "").toString().trim();
-  const agentId = ((body as any)?.agent_id || "").trim();
-  const task = ((body as any)?.task || "").trim();
+  const agentId = readStringField((body as any)?.agent_id);
+  const task = readStringField((body as any)?.task);
 
   const access = getAccessContext(c);
   const tenantId = access.tenantId || bodyTenantId;

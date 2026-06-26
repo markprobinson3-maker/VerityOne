@@ -18,6 +18,18 @@ const app = new Hono();
 const MAX_SSE_CLIENTS = 5;
 let activeClients = 0;
 
+// Test-only observability into the slot counter. The accounting is module-
+// private so production code can't poke it; tests need to assert reclamation.
+export function __getActiveSSEClients(): number {
+  return activeClients;
+}
+export function __resetActiveSSEClientsForTests(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("__resetActiveSSEClientsForTests is test-only");
+  }
+  activeClients = 0;
+}
+
 app.get("/events", (c) => {
   if (activeClients >= MAX_SSE_CLIENTS) {
     return errorJson(c, "rate_limited", { message: "Too many SSE clients (max 5)" });
@@ -25,6 +37,24 @@ app.get("/events", (c) => {
 
   activeClients++;
   let alive = true;
+  // The slot is released exactly once, no matter HOW the client goes away: a
+  // clean abort, a failed enqueue (client vanished mid-write), the consumer
+  // cancelling the stream, or a signal already aborted at start. Previously
+  // only the abort path decremented, so an enqueue-failure or a missing signal
+  // leaked the slot, the wiEvents listener, AND the 30s keepalive interval —
+  // after MAX_SSE_CLIENTS such deaths /events refused every future client.
+  let released = false;
+  let handler: ((event: WIEvent) => void) | null = null;
+  let keepalive: ReturnType<typeof setInterval> | null = null;
+  const release = () => {
+    if (released) return;
+    released = true;
+    alive = false;
+    activeClients--;
+    if (handler) wiEvents.off("wi", handler);
+    if (keepalive) clearInterval(keepalive);
+  };
+
   const replayRequested = c.req.query("replay") !== "0";
   const since = parseInt(c.req.query("since") || "0", 10);
 
@@ -36,7 +66,8 @@ app.get("/events", (c) => {
         try {
           controller.enqueue(encoder.encode(data));
         } catch {
-          alive = false;
+          // Client vanished mid-write — release the slot, not just on abort.
+          release();
         }
       };
 
@@ -49,26 +80,26 @@ app.get("/events", (c) => {
       }
 
       // Live events
-      const handler = (event: WIEvent) => {
+      handler = (event: WIEvent) => {
         send(`data: ${JSON.stringify(event)}\n\n`);
       };
       wiEvents.on("wi", handler);
 
       // Keepalive every 30s
-      const keepalive = setInterval(() => {
+      keepalive = setInterval(() => {
         send(": keepalive\n\n");
       }, 30_000);
 
-      // Cleanup on close
-      const cleanup = () => {
-        alive = false;
-        activeClients--;
-        wiEvents.off("wi", handler);
-        clearInterval(keepalive);
-      };
-
-      // Detect client disconnect via abort signal
-      c.req.raw.signal?.addEventListener("abort", cleanup);
+      // Detect client disconnect via abort signal (handle already-aborted too).
+      const signal = c.req.raw.signal;
+      if (signal) {
+        if (signal.aborted) release();
+        else signal.addEventListener("abort", release);
+      }
+    },
+    cancel() {
+      // Consumer cancelled the stream (the common Bun/Hono disconnect path).
+      release();
     },
   });
 

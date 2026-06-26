@@ -725,8 +725,8 @@ export async function route(atoms: ExtractedAtom[], runId: string, opts: RouteOp
           }
 
           await sql`
-            INSERT INTO wi_skill_proposals (content, source_url, skill_type, draft_md, status)
-            VALUES (${bestContent}, ${opts.sourceUrl}, ${atom.subtype}, ${draftMd}, 'proposed')
+            INSERT INTO wi_skill_proposals (content, source_url, skill_type, draft_md, status, run_id)
+            VALUES (${bestContent}, ${opts.sourceUrl}, ${atom.subtype}, ${draftMd}, 'proposed', ${runId})
           `;
           skillCount++;
           break;

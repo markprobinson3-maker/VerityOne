@@ -194,17 +194,24 @@ export function writeLocalDriveToken(input: {
   tenantId: string;
   nodeId: string;
   tokenJson: string;
+  /** A mid-tick token REFRESH (onTokens) persists the rotated token WITHOUT
+   *  resetting the live status to "idle" or clearing last_error — only the
+   *  initial / reauth write resets those. */
+  preserveStatus?: boolean;
 }): LocalDriveMirrorState {
   const ref = `drive:${input.tenantId}:${input.nodeId}`;
   const secret = writeLocalSecret(ref, input.tokenJson);
-  return writeLocalDriveMirrorState({
+  const patch: Partial<LocalDriveMirrorState> = {
     tenant_id: input.tenantId,
     node_id: input.nodeId,
-    status: "idle",
     token_secret_ref: ref,
     token_secret_storage: secret.storage,
-    last_error_code: null,
-  });
+  };
+  if (!input.preserveStatus) {
+    patch.status = "idle";
+    patch.last_error_code = null;
+  }
+  return writeLocalDriveMirrorState(patch);
 }
 
 export function readLocalDriveTokenJson(state = readLocalDriveMirrorState()): string | null {

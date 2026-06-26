@@ -4,9 +4,11 @@ const AgentIdSchema = z.string().max(64).regex(/^[a-z0-9_:-]+$/i);
 
 export const AgentSignalSchema = z.object({
   type: z.enum(["success", "failure", "query"]),
-  context: z.string(),
+  // Bounded so an oversized payload is rejected before the handler joins `nodes` into a
+  // string and passes the array to Postgres ANY(...) — mirrors RecallOutcomeSignalSchema.
+  context: z.string().max(2000),
   agent: AgentIdSchema.optional(),
-  nodes: z.array(z.unknown()).optional(),
+  nodes: z.array(z.unknown()).max(100).optional(),
 }).passthrough();
 
 export const RecallOutcomeSignalSchema = z.object({

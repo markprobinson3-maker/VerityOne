@@ -4,7 +4,12 @@
 
 import postgres from "postgres";
 
-export const sql = postgres("postgresql://localhost:5432/verity");
+// Honor DATABASE_URL (test-disposable points it at verity_test; the preload
+// guard refuses prod DBs) and fall back to the local graph — matching the
+// sibling miners (reactor.ts, qc-sentinel.ts, vi/config.ts, …). Previously
+// hardcoded to `verity`, so WI tests + runtime always hit the live DB and
+// could not be exercised against the disposable test database.
+export const sql = postgres(process.env.DATABASE_URL || "postgresql://localhost:5432/verity");
 
 // ============================================================
 // TYPES

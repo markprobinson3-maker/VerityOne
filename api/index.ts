@@ -124,7 +124,14 @@ export default {
       });
     }
 
-    if (LONG_LIVED_PREFIX_RE.test(url.pathname)) {
+    // /ops/backup-status is a deliberate exception: a standalone serverless-safe
+    // router (api/src/routes/backup-status.ts, mounted in app.ts) handles it
+    // without importing the long-lived ops surface, so operators can read the
+    // hosted mirror's DR status from the serverless prod API.
+    if (
+      url.pathname !== "/ops/backup-status" &&
+      LONG_LIVED_PREFIX_RE.test(url.pathname)
+    ) {
       const { errorResponse } = await loadErrorEnvelope();
       return errorResponse("service_unavailable", {
         message: "Route unavailable in serverless profile",

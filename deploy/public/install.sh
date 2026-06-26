@@ -139,8 +139,11 @@ fi
 # today (Homebrew-driven Postgres/bun install); without this check a Linux or
 # WSL user clones successfully and then dies deep inside bootstrap with an
 # unrelated-looking error. VO_FORCE_PLATFORM=1 skips the guard for people
-# intentionally doing a manual setup on another OS.
-if [ "$(uname -s)" != "Darwin" ] && [ "${VO_FORCE_PLATFORM:-}" != "1" ]; then
+# intentionally doing a manual setup on another OS. VO_SKIP_BOOTSTRAP=1 also
+# skips it: that path only fetches/verifies/clones/checks-out and stops BEFORE
+# bootstrap, which is platform-agnostic — and it is exactly the CI smoke path
+# (the guard otherwise dark-failed public-install-smoke on Linux since #314).
+if [ "$(uname -s)" != "Darwin" ] && [ "${VO_FORCE_PLATFORM:-}" != "1" ] && [ "${VO_SKIP_BOOTSTRAP:-}" != "1" ]; then
   err "Verity One's automated installer supports macOS only today (Linux/Windows: manual setup — see https://verityone.app/start). Set VO_FORCE_PLATFORM=1 to continue anyway at your own risk."
 fi
 
@@ -199,12 +202,24 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" 2>/dev/null \
       || git -C "$INSTALL_DIR" remote add origin "$REPO_URL"
   fi
-  git -C "$INSTALL_DIR" fetch origin --tags --quiet
-  git -C "$INSTALL_DIR" checkout --quiet "$TARGET_REF"
+  git -C "$INSTALL_DIR" fetch origin --tags --quiet \
+    || err "could not fetch from $REPO_URL (network or auth issue) — check your connection and re-run."
+  # Resolve the ref to a concrete commit and detach onto it (batch-32 VO-INST-3/4):
+  # a re-run with VO_GIT_REF=main on an EXISTING checkout would otherwise
+  # `checkout main` and keep the STALE local branch tip, silently installing old
+  # code. Peel to ^{commit} (branch/tag/SHA); --verify --quiet avoids the
+  # rev-parse-echoes-the-literal-ref footgun on a miss.
+  if RESOLVED=$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "origin/$TARGET_REF^{commit}"); then :;
+  else RESOLVED=$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "$TARGET_REF^{commit}" || printf ''); fi
+  [ -n "$RESOLVED" ] || err "could not resolve ref '$TARGET_REF' in $INSTALL_DIR — check VO_GIT_REF, or re-clone into a fresh VO_INSTALL_DIR."
+  git -C "$INSTALL_DIR" checkout --quiet --detach "$RESOLVED" \
+    || err "could not check out $TARGET_REF in $INSTALL_DIR (local edits or divergent history?). Stash/discard changes (git -C \"$INSTALL_DIR\" stash) or re-clone into a fresh VO_INSTALL_DIR, then re-run."
 else
   say "Cloning $REPO_URL to $INSTALL_DIR"
-  git clone --quiet "$REPO_URL" "$INSTALL_DIR"
-  git -C "$INSTALL_DIR" checkout --quiet "$TARGET_REF"
+  git clone --quiet "$REPO_URL" "$INSTALL_DIR" \
+    || err "could not clone $REPO_URL into $INSTALL_DIR — check your connection / the repo URL and re-run."
+  git -C "$INSTALL_DIR" checkout --quiet "$TARGET_REF" \
+    || err "could not check out $TARGET_REF after clone — check VO_GIT_REF."
 fi
 
 # Hand off to the local bootstrap

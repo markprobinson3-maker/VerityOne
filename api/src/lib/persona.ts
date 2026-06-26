@@ -14,6 +14,12 @@ export interface NodePersona {
 }
 
 export async function generatePersona(addr: string): Promise<NodePersona | null> {
+  // L6-4 / public-only: a persona's node substance is fed verbatim into the LLM
+  // debate prompt. selectAgentNodes' semantic path already restricts to
+  // visibility='public', but user-supplied forced addrs bypassed that and could
+  // pull a private/tenant node's substance into an external LLM call. This is
+  // the single chokepoint that loads substance, so the public filter here
+  // covers both the auto-selected and forced paths.
   const [node] = await sql`
     SELECT addr, label, node_type, confidence,
       substance->>'description' AS description,
@@ -25,8 +31,8 @@ export async function generatePersona(addr: string): Promise<NodePersona | null>
       provenance->>'basis' AS basis
     FROM nodes
     WHERE addr = ${addr}
-      AND visibility <> 'deleted'`;
-  
+      AND visibility = 'public'`;
+
   if (!node) return null;
 
   const provides = node.provides ? JSON.parse(JSON.stringify(node.provides)) : [];

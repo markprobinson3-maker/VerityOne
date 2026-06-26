@@ -80,6 +80,31 @@ export async function doctor(opts: DoctorOptions = {}): Promise<boolean> {
 
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
+  let childExited = false;
+
+  // Liveness: if the child cannot be executed (bad nodeBin → async 'error':
+  // ENOENT/EACCES) or exits during the handshake (e.g. config 'no_token' →
+  // process.exit(1) before it ever answers initialize), reject every pending
+  // request immediately instead of letting it stall the full 15s timeout or
+  // surface as an uncaught 'error' event that crashes the CLI. The existing
+  // try/catch routes the rejection through fail(), which prints the captured
+  // child stderr (the real reason) in ~ms. (batch-31)
+  child.on("error", (err: Error) => {
+    childExited = true;
+    for (const [, p] of pending) {
+      clearTimeout(p.timer);
+      p.reject(new Error(`failed to spawn server: ${err.message}`));
+    }
+    pending.clear();
+  });
+  child.on("exit", (code, signal) => {
+    childExited = true;
+    for (const [, p] of pending) {
+      clearTimeout(p.timer);
+      p.reject(new Error(`server exited early (code=${code} signal=${signal})`));
+    }
+    pending.clear();
+  });
 
   const rl: any = readline.createInterface({ input: child.stdout! });
   rl.on("line", (line: string) => {
@@ -196,6 +221,9 @@ export async function doctor(opts: DoctorOptions = {}): Promise<boolean> {
     // 5. clean shutdown
     child.kill("SIGTERM");
     await new Promise<void>((resolve) => {
+      // If the child already exited (our exit listener fired), don't wait the
+      // 2s fallback — resolve immediately.
+      if (childExited) return resolve();
       let done = false;
       const finalize = () => {
         if (done) return;

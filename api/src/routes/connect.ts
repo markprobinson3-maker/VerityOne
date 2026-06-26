@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import { sql } from "../db";
 import { errorJson } from "../lib/error-envelope";
-import { allowedRegistryAccessLevels, assertAgentSelfOrOperator, getAccessContext, hasBetaAccess, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
+import { allowedRegistryAccessLevels, assertAgentSelfOrOperator, getAccessContext, hasBetaAccess, isSafeAgentId, looksLikeVoSecret, resolveAgentTenant, visibleSpaceIds } from "../lib/access";
 import { GLOBAL_SPACE_ID } from "../lib/spaces";
 import { ARCHIVED_PYRAMIDS } from "../lib/visible-graph";
 
@@ -37,6 +37,20 @@ connect.get("/", async (c) => {
   if (agentId !== undefined && !agentId) {
     return errorJson(c, "invalid_request", { message: "agent parameter must not be empty" });
   }
+  // Validate agent-id shape BEFORE the auth gate so a malformed/oversized or
+  // token-looking id is rejected identically whether or not the caller holds a
+  // valid beta token (no token-validity oracle) and BEFORE any DB read/write.
+  // Mirrors the portal/account credential-mint controls.
+  if (agentId !== undefined) {
+    if (!isSafeAgentId(agentId)) {
+      return errorJson(c, "invalid_request", {
+        message: "agent must be 1-80 chars: letters, numbers, underscore, dot, colon, or hyphen",
+      });
+    }
+    if (looksLikeVoSecret(agentId)) {
+      return errorJson(c, "invalid_request", { message: "agent must not contain a token-looking value" });
+    }
+  }
 
   let agentBlock: any = undefined;
   let isFirstTime = false;
@@ -56,6 +70,13 @@ connect.get("/", async (c) => {
     // onboarding, but must not act as — or disclose — an existing foreign agent.
     const canActAsAgent = assertAgentSelfOrOperator(c, agentId);
     const agentTenant = resolveAgentTenant(c, agentId);
+    // A plain shared beta token (no mapped tenant AND no mapped agent identity)
+    // resolves to the "system" sentinel tenant. Such a caller must not be able to
+    // spray unbounded rows into agent_profiles. Only persist a new profile when the
+    // caller maps to a real tenant or can act as the agent (operator / mapped agent
+    // credential). Unmapped shared-token callers still receive the full onboarding
+    // payload below — we simply do not write a row for them.
+    const mayPersistProfile = canActAsAgent || agentTenant !== "system";
 
     // Check if agent exists (in the caller's tenant)
     const [existing] = await sql`SELECT * FROM agent_profiles WHERE tenant_id = ${agentTenant} AND agent_id = ${agentId}`;
@@ -67,10 +88,12 @@ connect.get("/", async (c) => {
       if (platform) metadata.platform = platform;
       metadata.connected_at = new Date().toISOString();
 
-      await sql`
-        INSERT INTO agent_profiles (tenant_id, agent_id, capabilities, metadata)
-        VALUES (${agentTenant}, ${agentId}, ${capabilities}, ${sql.json(metadata)})
-        ON CONFLICT (tenant_id, agent_id) DO NOTHING`;
+      if (mayPersistProfile) {
+        await sql`
+          INSERT INTO agent_profiles (tenant_id, agent_id, capabilities, metadata)
+          VALUES (${agentTenant}, ${agentId}, ${capabilities}, ${sql.json(metadata)})
+          ON CONFLICT (tenant_id, agent_id) DO NOTHING`;
+      }
 
       isFirstTime = true;
       agentBlock = {
@@ -309,7 +332,7 @@ connect.get("/", async (c) => {
   GET /search?q=concept — semantic + keyword hybrid search.\n`
     : "";
 
-  const systemPrompt = `You have access to Verity One, a living knowledge graph and memory system at ${c.req.url.split('/connect')[0]}. It learns from your usage and remembers across sessions.
+  const systemPrompt = `You have access to Verity One, a local-first knowledge graph and memory system at ${c.req.url.split('/connect')[0]}. Your local node holds your authoritative memory across sessions; the hosted surface is an optional, derived mirror — keep durable truth in your local node.
 
 RECALL FIRST: When your task depends on prior decisions, preferences, or corrections:
   POST /memory/recall {"query":"what was decided about X"} — get scored tenant memories with conflict detection.
@@ -318,8 +341,8 @@ ACT: When you need a concrete next step:
   GET /ground?goal=<your+goal>${agentId ? `&agent=${agentId}` : ''} — grounded action path with memory constraints.
   GET /run/<addr> — prerequisites checked, commands ready, confidence scored.
 
-REMEMBER: When you learn something durable:
-  POST /memory/write {"kind":"decision","assertion":"what you learned","source":"user_accepted"} — saves to tenant memory.
+REMEMBER: When you learn something durable (on your local node this writes through immediately; on this hosted mirror it is a queued intent your local node applies on next sync):
+  POST /memory/write {"kind":"decision","assertion":"what you learned","source":"agent_inferred"} — record a durable memory.
   POST /memory/retract {"addr":"PJ.0.3.X","reason":"why"} — mark a memory as no longer valid.
 
 DAILY: GET /agenda${agentId ? `?agent=${agentId}` : ''} — what matters today, personalized to your history.
@@ -327,13 +350,13 @@ SIGNAL: POST /signal/agent {"type":"success|failure","context":"what happened"${
 WATCH: POST /watch {"agent":"${agentId || 'your-id'}","filter":"domain:security"} then GET /watch/${agentId || 'your-id'} for digests.
 TIPS: Use technology nouns, not problem descriptions. Add &compact=true for 90% smaller responses.
 
-The more you use it, the smarter it gets about what YOU need. Memory is the highest-value surface — prior decisions, corrections, and preferences that the model alone would not know.`;
+Memory is the highest-value surface — prior decisions, corrections, and preferences that the model alone would not know. Durable writes belong in your local node (authoritative); on the hosted mirror, writes are queued intents the local node later applies.`;
 
   const response: any = {
     ok: true,
     system_prompt: systemPrompt,
     verity_one: {
-      what: `A living knowledge graph that reacts to the world. ${nodeCount.n} nodes, ${edgeCount.n} edges, constantly updated by world events.`,
+      what: `Verity One is local-first: your own node holds your authoritative knowledge + memory. This public surface is an optional mirror — a living knowledge graph that reacts to the world (${nodeCount.n} nodes, ${edgeCount.n} edges). Discover here; keep your durable truth in your local node.`,
       why: "You get smarter. Your queries improve the graph. The graph improves your next query.",
       loop: "World events → heat nodes → you query heated knowledge → your signals improve it → better for everyone.",
       endpoints: {
@@ -349,7 +372,7 @@ The more you use it, the smarter it gets about what YOU need. Memory is the high
         capabilities: { method: "GET", path: "/capabilities?domain=optional", what: "Paginated capability directory filterable by domain." },
         // Memory — recall and write tenant-local memory
         memory_recall: { method: "POST", path: "/memory/recall", body: '{"query":"what was decided about X"}', what: "Recall scored tenant memories with conflict detection and freshness ranking.", auth: "tenant" },
-        memory_write: { method: "POST", path: "/memory/write", body: '{"kind":"decision","assertion":"what you learned","source":"user_accepted"}', what: "Save a durable memory to tenant space.", auth: "tenant" },
+        memory_write: { method: "POST", path: "/memory/write", body: '{"kind":"decision","assertion":"what you learned","source":"agent_inferred"}', what: "Save a durable memory to tenant space.", auth: "tenant" },
         memory_read: { method: "GET", path: "/memory/:addr", what: "Read a specific memory with full lifecycle state.", auth: "tenant" },
         memory_retract: { method: "POST", path: "/memory/retract", body: '{"addr":"PJ.0.3.X","reason":"why"}', what: "Mark a memory as no longer valid.", auth: "tenant" },
         // Action — do things
@@ -394,7 +417,7 @@ The more you use it, the smarter it gets about what YOU need. Memory is the high
         ]
       : [
           `POST /memory/recall {"query":"what was decided about X"} — recall tenant memories`,
-          `POST /memory/write {"kind":"decision","assertion":"...","source":"user_accepted"} — write a durable memory`,
+          `POST /memory/write {"kind":"decision","assertion":"...","source":"agent_inferred"} — write a durable memory`,
           `GET /agenda${agentId ? `?agent=${agentId}` : ''} — priorities and maintenance signals`,
         ],
     // Active machine-level tenant settings (TENANT-CONTROL-SURFACE-DESIGN-PR-1)

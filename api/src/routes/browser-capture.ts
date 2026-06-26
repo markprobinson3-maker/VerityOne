@@ -25,8 +25,40 @@ import {
 import { writeBrowserCaptureIntake } from "../lib/browser-capture-intake";
 
 const MAX_INTAKE_CONTENT_LENGTH = 128_000;
+const MAX_CONTROL_BODY_BYTES = 64_000; // tokens/settings carry tiny JSON bodies
 
 const browserCapture = new Hono();
+
+/**
+ * Read a JSON body bounded by ACTUAL utf-8 bytes, not just the declared Content-Length
+ * (which a client can omit, lie about, or send chunked). Mirrors the post-read byte
+ * check in sync.ts / supercron.ts (batch-23 D4/D5). Returns the parsed value, or an
+ * errorJson Response the caller returns directly. An empty body parses to {}.
+ */
+async function readBoundedBody(
+  c: Context,
+  maxBytes: number,
+): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
+  const declared = Number(c.req.header("content-length") || "0");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, response: errorJson(c, "payload_too_large", { message: "Request body is too large.", details: { max_bytes: maxBytes } }) };
+  }
+  let raw: string;
+  try {
+    raw = await c.req.text();
+  } catch {
+    return { ok: false, response: errorJson(c, "invalid_request", { message: "Could not read request body." }) };
+  }
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    return { ok: false, response: errorJson(c, "payload_too_large", { message: "Request body is too large.", details: { max_bytes: maxBytes } }) };
+  }
+  if (raw.trim() === "") return { ok: true, value: {} };
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch {
+    return { ok: false, response: errorJson(c, "invalid_request", { message: "Valid JSON body required." }) };
+  }
+}
 
 type ClipperSyncRunnerFn = (typeof import("../lib/vault-harvest"))["runVaultClipperSync"];
 let clipperSyncRunnerOverride: ClipperSyncRunnerFn | null = null;
@@ -81,7 +113,9 @@ browserCapture.post("/tokens", async (c) => {
       details: { reason: "tenant_scoped_bearer_required" },
     });
   }
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed = await readBoundedBody(c, MAX_CONTROL_BODY_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const body = (parsed.value ?? {}) as Record<string, unknown>;
   const label = typeof body.label === "string" ? body.label : null;
   const result = issueBrowserCaptureToken({ tenantId: access.tenantId, label });
   return c.json({
@@ -148,7 +182,9 @@ browserCapture.post("/settings", async (c) => {
       details: { reason: "tenant_scoped_bearer_required" },
     });
   }
-  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed = await readBoundedBody(c, MAX_CONTROL_BODY_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const body = (parsed.value ?? {}) as Record<string, unknown>;
   if (typeof body.browser_capture_auto_harvest !== "boolean") {
     return errorJson(c, "invalid_request", {
       message: "browser_capture_auto_harvest must be true or false.",
@@ -236,7 +272,12 @@ browserCapture.post("/intake", async (c) => {
     });
   }
 
-  const body = await c.req.json().catch(() => null);
+  // Bound by ACTUAL bytes, not just the declared Content-Length checked above (which a
+  // client can omit or send chunked) — batch-23 D4. writeBrowserCaptureIntake validates
+  // the body shape, so any parsed JSON value is acceptable here.
+  const parsed = await readBoundedBody(c, MAX_INTAKE_CONTENT_LENGTH);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value;
   const result = writeBrowserCaptureIntake(state.vault_root, body);
   if (!result.ok) {
     const code = result.reason === "write_failed" ? "internal_error" : "invalid_request";

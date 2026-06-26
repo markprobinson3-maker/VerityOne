@@ -92,7 +92,7 @@ check.get("/:addr", async (c) => {
 
   // Fetch node
   const [node] = await sql`
-    SELECT n.addr, n.label, n.node_type, n.visibility, n.source_context, r.access_level,
+    SELECT n.addr, n.label, n.node_type, n.visibility, n.space_id, n.source_context, r.access_level,
       n.substance->'readiness' as readiness,
       n.substance->'quick_start' as quick_start, n.substance->>'slug' as slug,
       n.substance->>'description' as description

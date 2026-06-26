@@ -20,6 +20,7 @@ import { canonicalizeEdgeType } from "../lib/graph-shape";
 import { resolveDurableOntologyTarget, withAllocatedChildSlot } from "../lib/ontology";
 import { generatePersonas, type NodePersona } from "../lib/persona";
 import { errorJson, ApiError } from "../lib/error-envelope";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 import { auditMutation } from "../lib/audit";
 import { callOptionalMinerFlash } from "../lib/miner-llm-bridge";
 
@@ -358,15 +359,33 @@ async function stageArtifacts(
 
 // --- Main Endpoint ---
 
+const CONVENE_MAX_BODY_BYTES = 8_000;
+const CONVENE_MODES: ReadonlySet<string> = new Set(["debate", "consensus", "adversarial"]);
+
+/** Clamp a caller-supplied count into [min,max], tolerating junk/negatives. */
+function clampCount(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
 swarm.post("/convene", async (c) => {
-  const body = await c.req.json<ConveneRequest>().catch(() => ({} as ConveneRequest));
+  // Bounded read on an expensive/stateful LLM surface (B29-5). Operator-gated,
+  // but an unbounded body still pre-buffers before any validation.
+  const parsed = await readBoundedJsonBody(c, CONVENE_MAX_BODY_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const body = (parsed.value ?? {}) as ConveneRequest;
   const question = body.question;
   if (!question || typeof question !== "string") return errorJson(c, "invalid_request", { message: "question must be a non-empty string" });
   if (question.length > 2000) return errorJson(c, "invalid_request", { message: "question too long (max 2000 chars)" });
 
-  const maxAgents = Math.min(body.max_agents || 6, 12);
+  // Strict input validation (B29-5): a negative max_agents/rounds previously
+  // slipped through Math.min, and an unknown mode was cast through as-is.
+  if (body.mode != null && !CONVENE_MODES.has(String(body.mode))) {
+    return errorJson(c, "invalid_request", { message: "mode must be one of: debate, consensus, adversarial" });
+  }
+  const maxAgents = clampCount(body.max_agents, 6, 1, 12);
   const mode: ConveneMode = body.mode || "debate";
-  const rounds = Math.min(body.rounds || 3, 5);
+  const rounds = clampCount(body.rounds, 3, 1, 5);
   const startTime = Date.now();
 
   // Select node-agents
@@ -444,23 +463,16 @@ swarm.post("/convene", async (c) => {
   });
 });
 
-// GET /swarm/convene — convenience wrapper
+// GET /swarm/convene — read-only guard (B29-5).
+// Convene runs an LLM debate AND stages new edges/nodes, so it MUST NOT be
+// reachable via GET: GET is required to be safe (no side effects), and a
+// browser prefetch, a retrying proxy, or a crawler following the link would
+// otherwise trigger an expensive, mutating run. The wrapper used to rewrite
+// the GET into a POST and re-dispatch; that is removed. Callers must POST.
 swarm.get("/convene", async (c) => {
-  const question = c.req.query("q");
-  if (!question) return errorJson(c, "invalid_request", { message: "q parameter required" });
-  const mode = (c.req.query("mode") || "debate") as ConveneMode;
-  const maxAgents = parseInt(c.req.query("agents") || "6");
-
-  // Proxy to POST handler
-  const fakeReq = { question, max_agents: maxAgents, mode };
-  return swarm.fetch(
-    new Request(c.req.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fakeReq),
-    }),
-    c.env
-  );
+  return errorJson(c, "method_not_allowed", {
+    message: "GET /swarm/convene is not supported — convene runs an LLM debate and stages graph changes, so it must be invoked with POST /swarm/convene.",
+  });
 });
 
 export default swarm;

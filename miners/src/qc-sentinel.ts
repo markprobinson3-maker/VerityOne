@@ -773,7 +773,7 @@ async function applyDecision(staging: StagingItem, decision: QCDecision): Promis
           RETURNING addr`;
 
         if (insertedNode.length === 0) {
-          logLine(SENTINEL_AGENT, `  ⚠ Node ${node.addr} already exists — marking staging as duplicate`);
+          console.log(`  ⚠ Node ${node.addr} already exists — marking staging as duplicate`);
           await markStaging(table, staging.item.id, "rejected", SENTINEL_AGENT, "Duplicate: node addr already exists in production graph", {}, tx);
           return;
         }
@@ -794,7 +794,7 @@ async function applyDecision(staging: StagingItem, decision: QCDecision): Promis
         const edge = staging.item;
         const canonicalEdgeType = canonicalizeEdgeType(edge.edge_type);
         if (!canonicalEdgeType) {
-          logLine(SENTINEL_AGENT, `  ✗ Edge ${edge.from_addr}→${edge.to_addr} has non-canonical edge_type ${edge.edge_type}`);
+          console.log(`  ✗ Edge ${edge.from_addr}→${edge.to_addr} has non-canonical edge_type ${edge.edge_type}`);
           await markStaging(table, staging.item.id, "rejected", SENTINEL_AGENT, `Invalid edge_type: ${edge.edge_type}`, {}, tx);
           return;
         }
@@ -808,13 +808,16 @@ async function applyDecision(staging: StagingItem, decision: QCDecision): Promis
           layer: edge.layer,
           label: edge.label,
           confidence: finalConfidence,
-          hash: "pending",
+          // Omit hash so normalizeEdgeWriteParams fills the canonical
+          // md5(from|type|to); passing "pending" left a never-recomputed
+          // placeholder (foundation audit 2026-06-10 — the live 3,832 pending
+          // edge hashes trace to this + the trend engine + seed files).
           provenance: buildProvenance(runId),
           sourceContext: parseJsonField(edge.source_context) || {},
         }, { tx: tx as any });
 
         if (!insertedEdge.inserted) {
-          logLine(SENTINEL_AGENT, `  ⚠ Edge ${edge.from_addr}→${edge.to_addr} already exists — marking staging as duplicate`);
+          console.log(`  ⚠ Edge ${edge.from_addr}→${edge.to_addr} already exists — marking staging as duplicate`);
           await markStaging(table, staging.item.id, "rejected", SENTINEL_AGENT, "Duplicate: edge already exists in production graph", {}, tx);
           return;
         }

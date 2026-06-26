@@ -417,11 +417,20 @@ export async function getDashboardOverview(
       import("./federation-sync-health"),
     ]);
     localSyncStatus = await getSyncStatus(sql as any);
+    const lastResult = localSyncStatus.last_attempt?.last_result ?? null;
+    const lastAttemptAt = localSyncStatus.last_attempt?.last_attempt_at ?? null;
+    // A non-error sync attempt that actually ran — pushed successfully, confirmed
+    // nothing-to-push, or everything-filtered — IS the hosted-acknowledgement evidence
+    // for a local OUTBOUND node. There is no separate hosted timestamp stored locally,
+    // so without this the health was permanently "never" (the line-100 invariant in
+    // computeLocalSyncHealth) even while outbound sync worked fine — which fired a false
+    // "Hosted sync has not run yet" alert on Home and a "Never synced" badge on Account.
+    const HOSTED_ACK_RESULTS = new Set(["success", "nothing_to_export", "all_filtered"]);
     localSyncHealth = computeLocalSyncHealth({
       syncConfigured: Boolean(localSyncStatus.sync_configured),
-      lastAttemptAt: localSyncStatus.last_attempt?.last_attempt_at ?? null,
-      lastResult: localSyncStatus.last_attempt?.last_result ?? null,
-      hostedLastSyncAt: null,
+      lastAttemptAt,
+      lastResult,
+      hostedLastSyncAt: lastResult && HOSTED_ACK_RESULTS.has(lastResult) ? lastAttemptAt : null,
     });
   } catch { /* sync status unavailable */ }
 

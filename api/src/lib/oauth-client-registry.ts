@@ -219,9 +219,14 @@ export function connectorScopesIncludeWriteIntent(scopes: readonly string[]): bo
 
 function canonicalizeGrantTypes(raw: unknown): readonly string[] | null {
   if (raw === undefined || raw === null) {
-    // RFC 7591 §2: when grant_types is omitted, the default is
-    // ["authorization_code"]. We honor that — refresh_token is optional.
-    return [REQUIRED_GRANT_TYPE];
+    // When grant_types is OMITTED, default to the full supported pair
+    // (authorization_code + refresh_token). RFC 7591 §2 permits the server to
+    // substitute registered metadata, and the DCR response echoes the
+    // canonical set so the client sees what it got. This keeps refresh
+    // available for the common "omit grant_types" case (B29-1): only a client
+    // that EXPLICITLY registers ["authorization_code"] declares a code-only
+    // posture and is then correctly denied a refresh token at issuance.
+    return [REQUIRED_GRANT_TYPE, "refresh_token"];
   }
   if (!Array.isArray(raw) || !raw.every((x) => typeof x === "string")) return null;
   if (raw.length === 0) return null;
@@ -401,6 +406,30 @@ export function validateDcrRequest(raw: unknown): DcrValidationResult {
   const canonical_grant_types: string[] = gts.includes("refresh_token")
     ? ["authorization_code", "refresh_token"]
     : ["authorization_code"];
+
+  // response_types (B29-4): the server supports only "code" (advertised in AS
+  // metadata; /authorize rejects non-code). RFC 7591 defaults response_types to
+  // ["code"] when omitted, so absence is fine — but a PROVIDED value with
+  // anything other than a single "code" must be rejected at REGISTRATION, not
+  // accepted and then failed later at /authorize.
+  if (body.response_types !== undefined) {
+    const rts = body.response_types;
+    const valid = Array.isArray(rts)
+      && rts.length > 0
+      && rts.every((t) => typeof t === "string")
+      && new Set(rts as string[]).size === rts.length
+      && (rts as string[]).every((t) => t === "code");
+    if (!valid) {
+      return {
+        ok: false,
+        error: {
+          kind: "invalid_client_metadata",
+          field: "response_types",
+          message: 'response_types must be ["code"] — the only supported response type.',
+        },
+      };
+    }
+  }
 
   // scopes: canonicalize to the narrow connector scope sets. RFC 7591 clients
   // may omit scope; for this connector, omission means least-privilege

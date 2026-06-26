@@ -106,8 +106,12 @@ export function createPooledSql(
 
 export function createDirectSql(
   extra: postgres.Options<{}> = {},
+  dsn?: string,
 ): postgres.Sql<{}> {
-  return postgres(getDatabaseUrl(), {
+  // `dsn` lets a caller target a specific database WITHOUT mutating the global
+  // DATABASE_URL (which would leak to spawned children). Optional + second so all
+  // existing `createDirectSql()` / `createDirectSql({extra})` callers are unchanged.
+  return postgres(dsn?.trim() || getDatabaseUrl(), {
     max: 40,
     idle_timeout: 20,
     connect_timeout: 10,

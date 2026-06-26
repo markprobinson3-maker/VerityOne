@@ -28,6 +28,7 @@
 
 import crypto from "node:crypto";
 import { errorJson, ApiError } from "../lib/error-envelope";
+import { assertHostedMutationOrigin } from "../lib/hosted-origin";
 
 import { Hono } from "hono";
 
@@ -323,7 +324,7 @@ async function loadOrAutoProvisionConsentCredentials(
     const existing = await loadConsentCredentials(q, session);
     if (existing.length > 0) return { ok: true as const, credentials: existing };
 
-    const rawToken = `vop_REDACTED${crypto.randomBytes(32).toString("base64url")}`;
+    const rawToken = `vop_${crypto.randomBytes(32).toString("base64url")}`;
     const tokenHash = hashToken(rawToken);
     const tokenPrefix = rawToken.slice(0, 12);
     const agentId = newOauthAutoAgentId();
@@ -645,7 +646,10 @@ oauth.get("/.well-known/oauth-authorization-server", (c) => {
 // ── DCR ─────────────────────────────────────────────────────
 
 oauth.post("/oauth/register", async (c) => {
-  const body = await c.req.json().catch(() => null);
+  const bounded = await readBoundedOAuthBody(c, MAX_OAUTH_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  let body: any = null;
+  try { body = bounded.raw.trim() === "" ? null : JSON.parse(bounded.raw); } catch { body = null; }
   const v = validateDcrRequest(body);
   if (!v.ok) {
     const status = v.error.kind === "invalid_redirect_uri" ? 400 : 400;
@@ -735,6 +739,35 @@ function oauthProtocolErrorJson(
   return c.json({ error, error_description: description, ...(extra ?? {}) }, status as any);
 }
 
+// Byte ceiling for public OAuth request bodies (batch-25 #3). OAuth bodies are
+// tiny (DCR metadata + form params); the app-level limiters cap request COUNT,
+// not bytes.
+const MAX_OAUTH_BODY_BYTES = 64_000;
+
+// Read + byte-bound an OAuth request body before parsing, returning the raw text
+// or an OAuth-shaped (NOT VO-envelope) error response. The /oauth/token slice is
+// drift-guarded to never emit errorJson(, so this uses oauthProtocolErrorJson.
+// Bounds ACTUAL utf-8 bytes, not just the declared Content-Length.
+async function readBoundedOAuthBody(
+  c: any,
+  maxBytes: number,
+): Promise<{ ok: true; raw: string } | { ok: false; response: Response }> {
+  const declared = Number(c.req.header("content-length") || "0");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, response: oauthProtocolErrorJson(c, "invalid_request", "Request body is too large.", 413) };
+  }
+  let raw: string;
+  try {
+    raw = await c.req.text();
+  } catch {
+    return { ok: false, response: oauthProtocolErrorJson(c, "invalid_request", "Could not read request body.", 400) };
+  }
+  if (Buffer.byteLength(raw, "utf8") > maxBytes) {
+    return { ok: false, response: oauthProtocolErrorJson(c, "invalid_request", "Request body is too large.", 413) };
+  }
+  return { ok: true, raw };
+}
+
 oauth.get("/oauth/authorize", async (c) => {
   const params = c.req.query();
   const response_type = params.response_type;
@@ -753,6 +786,18 @@ oauth.get("/oauth/authorize", async (c) => {
   if (!client) {
     return authorizeError(c, null, state, "invalid_client", "Unknown or revoked client_id.");
   }
+  // Re-apply DCR-time redirect_uri hygiene on the LIVE value (batch-31). DCR
+  // rejects any query/fragment (classifyRedirectUri), but redirectUriMatches()
+  // for loopback compares only scheme+host+path — it ignores port AND query. So
+  // a registered http://127.0.0.1/cb would match http://127.0.0.1:9999/cb?next=
+  // https://evil, and callbackUrlWithCode preserves that ?next= when appending
+  // the code → loopback parameter-injection + code delivery to an attacker-chosen
+  // local port. Reject query/fragment here (the matcher line is drift-pinned, so
+  // close it at the authorize boundary). Per-port flexibility (RFC 8252 §7.3)
+  // stays intentional. Pass null as the redirect — never echo the tainted URI.
+  if (redirect_uri && (redirect_uri.includes("?") || redirect_uri.includes("#"))) {
+    return authorizeError(c, null, state, "invalid_request", "redirect_uri must not contain a query or fragment.");
+  }
   if (!redirect_uri || !client.redirect_uris.some((stored) => redirectUriMatches(redirect_uri, stored))) {
     return authorizeError(c, null, state, "invalid_request", "redirect_uri does not match a registered URI.");
   }
@@ -766,8 +811,17 @@ oauth.get("/oauth/authorize", async (c) => {
   if (code_challenge_method !== "S256") {
     return authorizeError(c, redirect_uri, state, "invalid_request", "code_challenge_method must be 'S256'.");
   }
-  if (!code_challenge || code_challenge.length < 43) {
-    return authorizeError(c, redirect_uri, state, "invalid_request", "code_challenge missing or too short.");
+  // A base64url SHA-256 challenge is ALWAYS exactly 43 chars (verifyPkceS256
+  // rejects any other length), so anything other than 43 is invalid input —
+  // tightened from `< 43` to `!== 43` to bound oversized dead-storage too (batch-31).
+  if (!code_challenge || code_challenge.length !== 43) {
+    return authorizeError(c, redirect_uri, state, "invalid_request", "code_challenge must be a 43-char base64url SHA-256 value.");
+  }
+  // Bound the persisted `state` (oauth_authorization_requests.state is unbounded
+  // TEXT). An authenticated tenant user could otherwise persist large rows; cap
+  // it as defense-in-depth alongside the existing per-IP rate limit (batch-31).
+  if (state && state.length > 1024) {
+    return authorizeError(c, redirect_uri, state, "invalid_request", "state too long.");
   }
   const effectiveResource = requestedResource(resource);
   if (!acceptedAudiences().includes(effectiveResource)) {
@@ -835,10 +889,17 @@ oauth.get("/oauth/authorize", async (c) => {
 });
 
 oauth.post("/oauth/authorize/consent", async (c) => {
+  // Cookie/session-authenticated browser mutation → same Origin/CSRF guard /account
+  // applies (batch-23 D3). The OAuth bearer/PKCE endpoints (token/register/revoke) are
+  // intentionally cross-origin and are deliberately NOT guarded here.
+  const originGuard = assertHostedMutationOrigin(c);
+  if (!originGuard.ok) return originGuard.response;
   const session = await resolveSessionAccount(c);
   if (!session) return errorJson(c, "unauthorized", { message: "session_required" });
 
-  const body = await c.req.parseBody();
+  const bounded = await readBoundedOAuthBody(c, MAX_OAUTH_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = Object.fromEntries(new URLSearchParams(bounded.raw)) as Record<string, string>;
   const consent_nonce = formString(body.consent_nonce);
   const credential_id = formString(body.credential_id);
   if (!consent_nonce || !credential_id) {
@@ -945,7 +1006,9 @@ oauth.post("/oauth/authorize/consent", async (c) => {
 
 oauth.post("/oauth/token", async (c) => {
   setOAuthNoStoreHeaders(c);
-  const body = await c.req.parseBody();
+  const bounded = await readBoundedOAuthBody(c, MAX_OAUTH_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = Object.fromEntries(new URLSearchParams(bounded.raw)) as Record<string, string>;
   const grant_type = String(body.grant_type ?? "");
   const client_id = String(body.client_id ?? "");
   const resource = requestedResource(body.resource);
@@ -974,7 +1037,8 @@ oauth.post("/oauth/token", async (c) => {
     // filters status='active', so a lifecycle-aged client cannot mint tokens
     // (recovery is a fresh RFC 7591 re-registration). Checked after request-
     // shape validation to preserve RFC 6749 error precedence.
-    if (!(await lookupActiveClient(sql, client_id))) {
+    const authCodeClient = await lookupActiveClient(sql, client_id);
+    if (!authCodeClient) {
       return oauthProtocolErrorJson(c, "invalid_client", "Unknown, dormant, archived, or revoked client_id.", 400);
     }
     let r: Awaited<ReturnType<typeof exchangeAuthCode>>;
@@ -985,6 +1049,9 @@ oauth.post("/oauth/token", async (c) => {
         redirect_uri,
         resource,
         code_verifier,
+        // B29-1: only mint a refresh token for clients that registered the
+        // refresh_token grant. Code-only clients get an access token only.
+        allow_refresh: authCodeClient.grant_types.includes("refresh_token"),
       }, {
         auditInside: async (tx, issued) => {
           await insertAudit(tx, {
@@ -1020,7 +1087,9 @@ oauth.post("/oauth/token", async (c) => {
     await markOauthClientUsed(client_id);
     return c.json({
       access_token: r.access_token,
-      refresh_token: r.refresh_token,
+      // Omit refresh_token when absent (B29-1: code-only clients get none).
+      // RFC 6749 §5.1 makes it OPTIONAL, so omission beats refresh_token:null.
+      ...(r.refresh_token ? { refresh_token: r.refresh_token } : {}),
       token_type: "Bearer",
       expires_in: Math.floor((r.access_expires_at.getTime() - Date.now()) / 1000),
       scope: r.scopes.join(" "),
@@ -1083,7 +1152,9 @@ oauth.post("/oauth/token", async (c) => {
     await markOauthClientUsed(client_id);
     return c.json({
       access_token: r.access_token,
-      refresh_token: r.refresh_token,
+      // Omit refresh_token when absent (B29-1: code-only clients get none).
+      // RFC 6749 §5.1 makes it OPTIONAL, so omission beats refresh_token:null.
+      ...(r.refresh_token ? { refresh_token: r.refresh_token } : {}),
       token_type: "Bearer",
       expires_in: Math.floor((r.access_expires_at.getTime() - Date.now()) / 1000),
       scope: r.scopes.join(" "),
@@ -1103,19 +1174,28 @@ oauth.post("/oauth/token", async (c) => {
 
 oauth.post("/oauth/revoke", async (c) => {
   setOAuthNoStoreHeaders(c);
-  const body = await c.req.parseBody();
+  const bounded = await readBoundedOAuthBody(c, MAX_OAUTH_BODY_BYTES);
+  if (!bounded.ok) return bounded.response;
+  const body = Object.fromEntries(new URLSearchParams(bounded.raw)) as Record<string, string>;
   const token = String(body.token ?? "");
   if (!token) {
     // RFC 7009 §2.2: respond 200 even on missing/unknown
     // tokens. Do NOT leak existence info.
     return c.body(null, 200);
   }
+  // RFC 7009 §2.1: public-client deployment, so the request-body client_id is
+  // the only client identity. Bind it so a caller can only revoke a token issued
+  // to its OWN client — a missing/mismatched client_id is a silent no-op (§2.2).
+  // Without this, anyone holding another client's token string could revoke that
+  // client's entire grant family.
+  const clientId = String(body.client_id ?? "");
   const correlation_id = correlationIdForRequest(c);
   await sql.begin(async (tx) => {
     // auditInside only fires when the presented token resolved to a family
     // (RFC 7009: unknown tokens stay silent). The audit row commits atomically
     // with the family revoke inside this transaction.
     await revokeByPresentedToken(tx as any, token, "oauth_revoke", {
+      expectedClientId: clientId,
       auditInside: async (txx, result) => {
         await insertAudit(txx, {
           event_type: "oauth_token_revoke",
@@ -1250,6 +1330,10 @@ oauth.get("/my/connectors", async (c) => {
 });
 
 oauth.post("/my/connectors/:grant_family_id/revoke", async (c) => {
+  // Cookie/session-authenticated browser mutation → same Origin/CSRF guard /account
+  // applies (batch-23 D3).
+  const originGuard = assertHostedMutationOrigin(c);
+  if (!originGuard.ok) return originGuard.response;
   const session = await resolveSessionAccount(c);
   if (!session || !session.tenant_id) return c.redirect("/my", 302);
   const family_id = c.req.param("grant_family_id");

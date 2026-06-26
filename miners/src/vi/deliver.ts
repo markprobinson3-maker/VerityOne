@@ -20,6 +20,24 @@ import { deriveStimulusOrigin } from "../lib/stimulus-origin";
 import { resolveDurableOntologyTarget, withAllocatedChildSlot } from "../../../api/src/lib/ontology";
 
 /**
+ * VI-4: corroboration-boost gate. A boost bumps an existing node's confidence
+ * when a new atom strongly AGREES with it. Require a PROVENANCE-VERIFIED atom
+ * (its source_excerpt was confirmed to appear in the source) in addition to an
+ * explicit no-contradiction verdict + high similarity. Content that fails the
+ * provenance check — including injected/hallucinated atoms that steer the SORT
+ * contradiction LLM toward "no" — must not be able to inflate a node's
+ * confidence. Verified atoms still corroborate exactly as before.
+ */
+export function shouldApplyCorroborationBoost(atom: ClassifiedAtom): boolean {
+  return (
+    atom.contradiction_verdict === "no" &&
+    atom.provenance === "verified" &&
+    !!atom.nearest_node_addr &&
+    atom.nearest_similarity > 0.90
+  );
+}
+
+/**
  * DELIVER: Write classified atoms to their destination tables
  */
 export async function deliver(ctx: IngestContext): Promise<void> {
@@ -79,9 +97,9 @@ export async function deliver(ctx: IngestContext): Promise<void> {
       VALUES (${batch_id}, ${source_type}, ${atom.score}, ${atom.classification})
     `.catch(() => {});
 
-    // Corroboration boost (contradiction_verdict === "no" with high similarity)
-    if (atom.contradiction_verdict === "no" && atom.nearest_node_addr && atom.nearest_similarity > 0.90) {
-      await applyCorroborationBoost(atom.nearest_node_addr, batch_id);
+    // Corroboration boost — verified, explicitly-agreeing, highly-similar atoms only (VI-4).
+    if (shouldApplyCorroborationBoost(atom)) {
+      await applyCorroborationBoost(atom.nearest_node_addr!, batch_id);
     }
   }
 

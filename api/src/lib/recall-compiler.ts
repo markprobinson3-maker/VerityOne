@@ -805,7 +805,7 @@ export async function compileRecallWithDeps(
         const staleCount = stale.length;
         const conflictedCount = scored.filter((m) => !m.conflict_free).length;
         if (lowRelevance > 0) reasons.push(`${lowRelevance} low-relevance`);
-        if (staleCount > 0) reasons.push(`${staleCount} stale (>90 days)`);
+        if (staleCount > 0) reasons.push(`${staleCount} stale (>30 days)`);
         if (conflictedCount > 0) reasons.push(`${conflictedCount} in conflict`);
         if (recovered) reasons.push("partial results due to timeout/error recovery");
         return reasons;

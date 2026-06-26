@@ -16,6 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { writeLocalConfigAtomic0600 } from "./runtime-profile";
 
 // ── Config path resolution (reuse runtime-profile convention) ────────
 
@@ -44,9 +45,9 @@ function readConfig(): Record<string, unknown> {
 }
 
 function writeConfig(config: Record<string, unknown>): void {
-  const cfgPath = resolveConfigPath();
-  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  // 0600 atomic writer (batch-25 #1) — config.json may carry tokens/keys, so it
+  // must never be world-readable.
+  writeLocalConfigAtomic0600(resolveConfigPath(), config);
 }
 
 // ── Secrets read/write (~/.vo/secrets.env) ───────────────────────────
@@ -59,9 +60,11 @@ function readSecrets(): Record<string, string> {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
+      // Tolerate a leading `export ` (batch-31; matches mcp/src/config.ts).
+      const body = trimmed.startsWith("export ") ? trimmed.slice(7).trimStart() : trimmed;
+      const eqIdx = body.indexOf("=");
       if (eqIdx < 1) continue;
-      result[trimmed.slice(0, eqIdx).trim()] = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+      result[body.slice(0, eqIdx).trim()] = body.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
     }
   } catch { /* no secrets file yet */ }
   return result;
@@ -609,10 +612,12 @@ export function loadSecretsEnv(explicitPath?: string): void {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-    const eqIdx = trimmed.indexOf("=");
+    // Tolerate a leading `export ` (batch-31; matches mcp/src/config.ts).
+    const body = trimmed.startsWith("export ") ? trimmed.slice(7).trimStart() : trimmed;
+    const eqIdx = body.indexOf("=");
     if (eqIdx < 1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+    const key = body.slice(0, eqIdx).trim();
+    const val = body.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
     if (!process.env[key]) process.env[key] = val;
   }
 }

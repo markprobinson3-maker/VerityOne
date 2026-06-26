@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Dependency-light local vault root resolver and inspector.",
+  "scripts": {
+    "build:cjs": "bun build src/index.js --target=node --format=cjs --outfile=src/index.cjs"
+  },
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
+      "require": { "types": "./src/index.d.cts", "default": "./src/index.cjs" },
+      "import": { "types": "./src/index.d.ts", "default": "./src/index.js" },
       "default": "./src/index.js"
     }
   },

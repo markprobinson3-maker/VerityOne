@@ -22,8 +22,12 @@ import crypto from "node:crypto";
 import { errorJson, ApiError } from "../lib/error-envelope";
 import { auditMutation } from "../lib/audit";
 import { clampInt } from "../lib/utils";
+import { readBoundedJsonBody } from "../lib/bounded-body";
 
 const federation = new Hono();
+
+// Pre-auth /refresh body is tiny (tenant_id + node_id + refresh_token).
+const FEDERATION_REFRESH_MAX_BODY_BYTES = 4_000;
 
 // ── Helpers ──
 
@@ -128,7 +132,12 @@ federation.post("/register", async (c) => {
 // from a cron/background context without an interactive session.
 
 federation.post("/refresh", async (c) => {
-  const body = await c.req.json().catch(() => null);
+  // Bounded read (B29-9): a PRE-AUTH endpoint whose auth material
+  // (refresh_token) is IN the body, so it pre-buffers an attacker-supplied
+  // body before any credential check. The legit body is tiny.
+  const parsed = await readBoundedJsonBody(c, FEDERATION_REFRESH_MAX_BODY_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const body = parsed.value as { tenant_id?: unknown; node_id?: unknown; refresh_token?: unknown } | null;
   if (!body || !body.tenant_id || !body.node_id || !body.refresh_token) {
     return errorJson(c, "invalid_request", { message: "tenant_id, node_id, and refresh_token required" });
   }

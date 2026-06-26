@@ -284,7 +284,7 @@ const SKIP_LABEL_RULES: RegExp[] = [
   /^Layers$/i,
   /^Infrastructure$/i,
   /^The Fusion$/i,
-  /^governance-role$/i,
+  /^Nightkeeper$/i,
   /^Enterprise Features$/i,
   /^Cloud Sessions$/i,
   /^Sandboxed Bash$/i,

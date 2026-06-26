@@ -123,6 +123,9 @@ async function findMergeCandidates(threshold: number): Promise<MergeCandidate[]>
     WHERE a.addr < b.addr
       AND a.embedding_hv IS NOT NULL AND b.embedding_hv IS NOT NULL
       AND a.visibility = 'public' AND b.visibility = 'public'
+      -- batch-31: the manual distiller (operator-only --execute) must never touch
+      -- tenant graphs — the same tenant-safety guard supercron passes enforce.
+      AND a.space_id NOT LIKE 'tenant:%' AND b.space_id NOT LIKE 'tenant:%'
       AND a.pyramid_id = b.pyramid_id
       AND 1 - (a.embedding_hv::vector <=> b.embedding_hv::vector) > ${threshold}
     ORDER BY similarity DESC
@@ -275,6 +278,7 @@ async function findAbsorbCandidates(): Promise<AbsorbCandidate[]> {
     JOIN nodes p ON p.addr = c.parent_addr
     WHERE c.embedding_hv IS NOT NULL AND p.embedding_hv IS NOT NULL
       AND c.visibility = 'public' AND p.visibility = 'public'
+      AND c.space_id NOT LIKE 'tenant:%' AND p.space_id NOT LIKE 'tenant:%' -- batch-31 tenant-safety
       AND 1 - (c.embedding_hv::vector <=> p.embedding_hv::vector) > ${ABSORB_SIMILARITY_THRESHOLD}
       AND c.query_hits = 0
       AND c.confidence <= 0.6
@@ -367,8 +371,11 @@ Return JSON: {"enriched_substance": <the enriched parent substance object>}`;
           // Rewire child edges to parent
           await rewireEdgesForNodeMerge(sql as any, String(child.child_addr), String(parentAddr), { tx: tx as any });
           
-          // Hide child
-          await tx`UPDATE nodes SET visibility = 'absorbed',
+          // Hide child. 'merged' is a constraint-valid visibility; the prior
+          // 'absorbed' violated the nodes visibility CHECK and threw at runtime
+          // (this pass was dead/broken). The absorbed_into provenance records the
+          // semantic action. (batch-31)
+          await tx`UPDATE nodes SET visibility = 'merged',
             provenance = provenance || ${sql.json({ absorbed_into: parentAddr, absorbed_at: new Date().toISOString() })}
           WHERE addr = ${child.child_addr}`;
         }
@@ -396,6 +403,7 @@ async function findOrphans(minAgeHours: number): Promise<OrphanCandidate[]> {
     LEFT JOIN edges e_in ON e_in.to_addr = n.addr
     WHERE e_out.id IS NULL AND e_in.id IS NULL
       AND n.visibility = 'public'
+      AND n.space_id NOT LIKE 'tenant:%' -- batch-31 tenant-safety
       AND n.layer > 0
       AND EXTRACT(EPOCH FROM (now() - n.created_at)) / 3600 > ${minAgeHours}
     ORDER BY n.confidence ASC, age_hours DESC
@@ -426,11 +434,14 @@ async function executeOrphanDemotion(orphans: OrphanCandidate[]): Promise<void> 
       continue;
     }
 
-    await sql`UPDATE nodes SET 
-      visibility = 'demoted',
-      provenance = provenance || ${JSON.stringify({ 
-        demoted_at: new Date().toISOString(), 
-        demoted_reason: 'orphan_no_edges_no_queries' 
+    // 'dormant' is a constraint-valid visibility; the prior 'demoted' violated the
+    // nodes visibility CHECK and threw at runtime (this pass was dead/broken). The
+    // demoted_reason provenance records the semantic action. (batch-31)
+    await sql`UPDATE nodes SET
+      visibility = 'dormant',
+      provenance = provenance || ${JSON.stringify({
+        demoted_at: new Date().toISOString(),
+        demoted_reason: 'orphan_no_edges_no_queries'
       })}::jsonb
     WHERE addr = ${o.addr}`;
     
@@ -450,6 +461,7 @@ async function findPromotions(): Promise<PromoteCandidate[]> {
     WHERE query_hits >= ${PROMOTE_QUERY_THRESHOLD}
       AND confidence < ${MAX_CONFIDENCE}
       AND visibility = 'public'
+      AND space_id NOT LIKE 'tenant:%' -- batch-31 tenant-safety: never boost a tenant node's confidence
     ORDER BY query_hits DESC
     LIMIT 30
   `;

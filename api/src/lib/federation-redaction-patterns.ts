@@ -91,10 +91,10 @@ export const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
   // vs "you leaked a session cookie").
   {
     name: "vo_agent_credential",
-    // vop_REDACTED = hosted agent credential. Minted at
+    // vop_ = hosted agent credential. Minted at
     // POST /account/agent-keys; crypto.randomBytes(32)
     // → 43 chars of base64url. Lower bound 40 rules out
-    // short test fixtures like `vop_REDACTED<run-id>`.
+    // short test fixtures like `vop_abc_<run-id>`.
     regex: /\bvop_[A-Za-z0-9_-]{40,}/,
   },
   {
